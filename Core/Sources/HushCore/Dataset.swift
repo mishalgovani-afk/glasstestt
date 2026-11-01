@@ -78,13 +78,13 @@ public struct Dataset: Codable, Equatable, Sendable {
     public static func load(from url: URL) throws -> Dataset {
         let data = try Data(contentsOf: url)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .secondsSince1970
         return try decoder.decode(Dataset.self, from: data)
     }
 
     public func save(to url: URL) throws {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .secondsSince1970
         let data = try encoder.encode(self)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
