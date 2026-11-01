@@ -1,0 +1,43 @@
+name: Hush
+options:
+  bundleIdPrefix: dev.hush
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  HushCore:
+    path: Core
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Manual
+    # Set DEVELOPMENT_TEAM in Xcode (or pass DEVELOPMENT_TEAM=XXXX to xcodebuild) to sign.
+    # An ad-hoc ("-") signature is enough to run locally.
+    CODE_SIGN_IDENTITY: "-"
+targets:
+  Hush:
+    type: application
+    platform: macOS
+    sources: [App/Sources]
+    dependencies:
+      - package: HushCore
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Hush
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSMotionUsageDescription: Hush reads AirPods head-motion data to decode silently mouthed words into text.
+        NSMicrophoneUsageDescription: Hush records microphone audio alongside motion so whispered and silent speech can be compared.
+        NSSpeechRecognitionUsageDescription: Hush transcribes microphone audio on-device as a reference for the motion decoder.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.hush.app
+        ENABLE_HARDENED_RUNTIME: NO
+        GENERATE_INFOPLIST_FILE: NO
+schemes:
+  Hush:
+    build:
+      targets:
+        Hush: all

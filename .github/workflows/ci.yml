@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core-linux:
+    name: Core tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Test HushCore
+        working-directory: Core
+        run: swift test
+
+  macos:
+    name: Core tests + app build (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Test HushCore
+        working-directory: Core
+        run: swift test
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build Hush.app
+        run: |
+          set -o pipefail
+          xcodebuild -project Hush.xcodeproj -scheme Hush -configuration Release \
+            -derivedDataPath build -destination 'generic/platform=macOS' \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            build | tee build.log | grep -E "error:|warning: .*Hush|BUILD" || true
+          test -d build/Build/Products/Release/Hush.app
+      - name: Package
+        run: ditto -c -k --keepParent build/Build/Products/Release/Hush.app Hush.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hush-macOS
+          path: Hush.zip
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
