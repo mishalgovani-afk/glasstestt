@@ -5,3 +5,9 @@ DerivedData/
 .build/
 .swiftpm/
 xcuserdata/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+windows/hushcam/models/
+*.spec

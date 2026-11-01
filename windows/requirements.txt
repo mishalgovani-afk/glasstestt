@@ -1,0 +1,4 @@
+mediapipe==1.2.0
+numpy>=1.26
+pillow>=10
+pynput>=1.7

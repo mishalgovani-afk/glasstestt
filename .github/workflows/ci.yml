@@ -53,3 +53,47 @@ jobs:
         with:
           name: build-log
           path: build.log
+
+  windows:
+    name: HushCam webcam app (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest pyinstaller
+      - name: Unit tests
+        run: python -m pytest -q tests
+      - name: Fetch face model (checksum verified)
+        run: python fetch_model.py
+      - name: Self-test from source
+        run: |
+          python -m hushcam.app --selftest selftest-src.json
+          Get-Content selftest-src.json
+          if (-not (Get-Content selftest-src.json | ConvertFrom-Json).ok) { exit 1 }
+      - name: Build HushCam.exe
+        run: >
+          pyinstaller --noconfirm --clean --windowed --name HushCam
+          --collect-all mediapipe --collect-submodules pynput
+          --add-data "hushcam/models/face_landmarker.task;hushcam/models"
+          HushCam.py
+      - name: Self-test packaged exe
+        run: |
+          $out = Join-Path $PWD "selftest-exe.json"
+          Start-Process -FilePath "dist\HushCam\HushCam.exe" -ArgumentList "--selftest", "`"$out`"" -Wait
+          Get-Content $out
+          if (-not (Get-Content $out | ConvertFrom-Json).ok) { exit 1 }
+      - name: Package
+        run: Compress-Archive -Path dist\HushCam -DestinationPath HushCam-Windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HushCam-Windows
+          path: windows/HushCam-Windows.zip

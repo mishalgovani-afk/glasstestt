@@ -4,6 +4,8 @@
 
 It also tests itself. Before you trust the decoder, the **Evaluate** screen runs leave-one-out cross-validation and a label-permutation test. These tell you whether the motion signal really separates your words, or whether you are fooling yourself.
 
+> **On Windows?** Windows can't read AirPods motion, so there's a separate webcam lip-reading version, **HushCam**, in [`windows/`](windows/README.md). It has the same Train → Evaluate → Decode flow and comes as a ready-to-run `.exe`.
+
 > Honest framing: Apple doesn't expose the AirPods' speech-detecting accelerometer or inward mic. Hush only sees processed head motion at about 25 Hz. That catches jaw and head movement, not vocal-cord vibration. Small vocabularies that you train yourself are realistic. Open dictation is not.
 
 ## Get it
