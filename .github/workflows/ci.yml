@@ -97,3 +97,23 @@ jobs:
         with:
           name: HushCam-Windows
           path: windows/HushCam-Windows.zip
+
+  web:
+    name: Hush web app (iPhone / Android / desktop browsers)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Core tests (incl. parity with the Python core)
+        run: node --test tests/*.test.mjs
+      - name: Build static site
+        run: ./scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Hush-Web
+          path: web/dist
