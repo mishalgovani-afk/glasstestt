@@ -1,0 +1,525 @@
+<title>P5R Reverse Fusion</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one column. Ink-black header band with slanted red tabs, then a ruled
+   compendium list or a persona sheet (card + stats) with recipe rows below. */
+:root {
+  --bg: #f6f4f4;
+  --surface: #ffffff;
+  --ink: #141012;
+  --muted: #6c6266;
+  --line: #e2dcde;
+  --red: #d7141f;
+  --red-ink: #ffffff;
+  --band: #141012;
+  --band-fg: #f6f4f4;
+  --chip: #f0ebec;
+  --wk: #c8102e; --rs: #2b6cb0; --nu: #5a5a66; --rp: #7a3fb3; --ab: #1f8a4c; --none: #b9b0b3;
+  --gold: #a8780a;
+  --f-display: "Anton", "Impact", "Arial Narrow", sans-serif;
+  --f-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121012; --surface: #1c181a; --ink: #f2eced; --muted: #a2969a; --line: #332c2f;
+    --red: #ff3340; --red-ink: #120507; --band: #050404; --band-fg: #f2eced; --chip: #2a2427;
+    --wk: #ff5468; --rs: #63a4ff; --nu: #a3a3b2; --rp: #b884ff; --ab: #46cf82; --none: #5d5357;
+    --gold: #e3b341; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121012; --surface: #1c181a; --ink: #f2eced; --muted: #a2969a; --line: #332c2f;
+  --red: #ff3340; --red-ink: #120507; --band: #050404; --band-fg: #f2eced; --chip: #2a2427;
+  --wk: #ff5468; --rs: #63a4ff; --nu: #a3a3b2; --rp: #b884ff; --ab: #46cf82; --none: #5d5357;
+  --gold: #e3b341; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.45; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--band); }
+.wrap { max-width: 980px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+a { color: inherit; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
+
+/* header */
+header { background: var(--band); color: var(--band-fg); position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
+header .wrap { display: flex; align-items: flex-end; gap: 20px; flex-wrap: wrap; padding-block: 14px 0; }
+.brand { font-family: var(--f-display); font-size: 26px; letter-spacing: .02em; line-height: 1; padding-bottom: 12px; text-transform: uppercase; }
+.brand span { color: var(--red); }
+nav.tabs { display: flex; gap: 6px; margin-left: auto; }
+nav.tabs a { text-decoration: none; font-family: var(--f-display); text-transform: uppercase; letter-spacing: .06em; font-size: 15px;
+  padding: 9px 18px 8px; background: transparent; color: var(--band-fg); clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%); opacity: .7; }
+nav.tabs a:hover { opacity: 1; background: #ffffff14; }
+nav.tabs a[aria-current="page"] { background: var(--red); color: #fff; opacity: 1; }
+
+main { padding-block: 20px 48px; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 13px; color: var(--muted); margin-bottom: 14px; min-height: 20px; }
+.crumbs a { text-decoration: none; color: var(--muted); }
+.crumbs a:hover { color: var(--red); text-decoration: underline; }
+.crumbs .sep { opacity: .5; }
+.crumbs .here { color: var(--ink); font-weight: 600; }
+
+h1, h2 { font-family: var(--f-display); font-weight: 400; text-transform: uppercase; letter-spacing: .02em; text-wrap: balance; margin: 0; }
+h2 { font-size: 22px; }
+
+/* controls */
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.controls input[type="search"], .controls select { background: var(--surface); border: 1.5px solid var(--line); border-radius: 2px; padding: 8px 10px; min-width: 0; }
+.controls input[type="search"] { flex: 1 1 220px; }
+.controls input[type="search"]:focus, .controls select:focus { border-color: var(--red); outline: none; }
+.toggle { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; user-select: none; }
+.toggle input { accent-color: var(--red); width: 16px; height: 16px; }
+.count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* compendium list */
+.list { background: var(--surface); border: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: 52px 34px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); text-decoration: none; }
+.row:last-child { border-bottom: 0; }
+.row:hover { background: var(--chip); }
+.row:hover .nm { color: var(--red); }
+.lv { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14px; color: var(--muted); }
+.lv b { color: var(--ink); font-size: 16px; }
+.nm { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.nm small { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.badges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.bd { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border: 1.5px solid currentColor; border-radius: 2px; white-space: nowrap; }
+.bd.special { color: var(--red); }
+.bd.rare { color: var(--gold); }
+.bd.dlc { color: var(--rs); }
+.bd.mx { color: var(--rp); }
+.row.off { opacity: .45; }
+
+/* arcana glyph */
+.glyph { display: block; }
+.glyph text { font-family: var(--f-display); }
+
+/* persona sheet */
+.sheet { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 22px; align-items: start; background: var(--surface); border: 1px solid var(--line); padding: 20px; position: relative; overflow: hidden; }
+.sheet::after { content: ""; position: absolute; right: -40px; top: 0; bottom: 0; width: 120px; background: var(--red); transform: skewX(-14deg); opacity: .08; pointer-events: none; }
+.sheet h1 { font-size: clamp(30px, 6vw, 48px); line-height: 1; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 8px 0 14px; color: var(--muted); font-size: 14px; }
+.meta strong { color: var(--ink); }
+.statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px 28px; }
+.stats { display: grid; gap: 5px; }
+.stat { display: grid; grid-template-columns: 26px 30px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 13px; }
+.stat .k { font-weight: 700; color: var(--muted); letter-spacing: .04em; }
+.stat .v { font-family: var(--f-mono); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.bar { height: 8px; background: var(--chip); position: relative; }
+.bar i { position: absolute; inset: 0 auto 0 0; background: var(--ink); clip-path: polygon(0 0, 100% 0, calc(100% - 4px) 100%, 0 100%); }
+.elems { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.el { text-align: center; border: 1px solid var(--line); padding: 4px 2px; }
+.el .k { display: block; font-size: 10.5px; color: var(--muted); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.el .v { display: block; font-family: var(--f-mono); font-weight: 700; font-size: 13px; text-transform: uppercase; }
+.v.wk { color: var(--wk); } .v.rs { color: var(--rs); } .v.nu { color: var(--nu); } .v.rp { color: var(--rp); } .v.ab { color: var(--ab); } .v.none { color: var(--none); }
+.sublabel { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+.skills { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 16px; }
+.sk { font-size: 12.5px; background: var(--chip); padding: 3px 8px; border-radius: 2px; }
+.sk b { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); margin-left: 4px; font-weight: 500; }
+.legend { font-size: 12px; color: var(--muted); margin-top: 8px; }
+
+/* recipe section */
+.sec-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 28px 0 12px; }
+.seg { display: inline-flex; border: 1.5px solid var(--ink); }
+.seg button { background: transparent; border: 0; padding: 7px 14px; cursor: pointer; font-weight: 600; font-size: 14px; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.note { font-size: 13px; color: var(--muted); margin: 0 0 12px; max-width: 70ch; }
+.recipes { display: grid; gap: 6px; }
+.recipe { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; background: var(--surface); border: 1px solid var(--line); padding: 8px 10px; }
+.recipe .op { font-family: var(--f-mono); font-weight: 700; color: var(--red); font-size: 18px; line-height: 1; }
+.recipe .cost { margin-left: auto; font-family: var(--f-mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pchip { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding: 4px 10px 4px 4px; background: var(--chip); border-radius: 2px; min-width: 0; max-width: 100%; }
+.pchip:hover { background: var(--red); color: #fff; }
+.pchip:hover small { color: #ffffffcc; }
+.pchip .plv { font-family: var(--f-mono); font-weight: 700; font-size: 12px; background: var(--ink); color: var(--bg); padding: 2px 5px; min-width: 28px; text-align: center; }
+.pchip span { font-weight: 600; overflow-wrap: anywhere; }
+.pchip small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.pchip.result { background: transparent; border: 1.5px solid var(--ink); }
+.pchip.result:hover { border-color: var(--red); }
+.empty { background: var(--surface); border: 1px dashed var(--line); padding: 22px; color: var(--muted); }
+.more { margin-top: 10px; background: transparent; border: 1.5px solid var(--ink); padding: 8px 16px; cursor: pointer; font-weight: 600; }
+.more:hover { background: var(--ink); color: var(--bg); }
+
+/* forward tab */
+.fuse-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: end; }
+.fuse-grid label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.fuse-grid select { width: 100%; background: var(--surface); border: 1.5px solid var(--line); padding: 9px 10px; font-size: 15px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); }
+.fuse-grid .op { font-family: var(--f-display); font-size: 28px; color: var(--red); padding-bottom: 6px; }
+.fuse-out { margin-top: 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); padding: 16px; min-height: 70px; }
+.fuse-out .eq { font-family: var(--f-display); font-size: 24px; color: var(--red); }
+
+footer { color: var(--muted); font-size: 12.5px; padding-block: 0 32px; }
+footer a { color: var(--muted); }
+
+@media (max-width: 560px) {
+  .sheet { grid-template-columns: 1fr; padding: 16px; }
+  .brand { font-size: 22px; }
+  nav.tabs { margin-left: 0; }
+  nav.tabs a { padding: 8px 12px 7px; font-size: 14px; }
+  .row { grid-template-columns: 44px 30px minmax(0, 1fr); }
+  .row .badges { grid-column: 3; justify-content: flex-start; }
+  .fuse-grid { grid-template-columns: 1fr; }
+  .fuse-grid .op { padding: 0; text-align: center; }
+  .recipe .cost { margin-left: 0; width: 100%; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pchip, .row, nav.tabs a { transition: background-color .12s, color .12s; }
+}
+</style>
+
+<header>
+  <div class="wrap">
+    <div class="brand">P5R <span>Fusion</span></div>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#" data-tab="reverse">Reverse Calculator</a>
+      <a href="#fuse" data-tab="fuse">Fuse Two</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap" id="app"></main>
+<footer class="wrap">
+  Persona 5 Royal data from the open-source <a href="https://github.com/chinhodado/persona5_calculator" target="_blank" rel="noopener">persona5_calculator</a> by chinhodado (Apache-2.0). Fusion costs are approximate. Fan tool, not affiliated with Atlus.
+</footer>
+
+<script type="application/json" id="p5r-data">/*DATA*/</script>
+<script>
+(function () {
+  "use strict";
+  var D = JSON.parse(document.getElementById("p5r-data").textContent);
+  var ELEMS = ["Phys", "Gun", "Fire", "Ice", "Elec", "Wind", "Psy", "Nuke", "Bless", "Curse"];
+  var ELV = { "wk": ["wk", "Weak"], "-": ["none", "–"], "rs": ["rs", "Resist"], "nu": ["nu", "Null"], "rp": ["rp", "Repel"], "ab": ["ab", "Drain"] };
+  var STATS = ["St", "Ma", "En", "Ag", "Lu"];
+  var ARCANA = ["Fool", "Magician", "Priestess", "Empress", "Emperor", "Hierophant", "Lovers", "Chariot", "Justice", "Hermit", "Fortune",
+    "Strength", "Hanged", "Death", "Temperance", "Devil", "Tower", "Star", "Moon", "Sun", "Judgement", "Faith", "Councillor", "World"];
+  var NUMERAL = { Fool: "0", Magician: "I", Priestess: "II", Empress: "III", Emperor: "IV", Hierophant: "V", Lovers: "VI", Chariot: "VII",
+    Justice: "VIII", Hermit: "IX", Fortune: "X", Strength: "XI", Hanged: "XII", Death: "XIII", Temperance: "XIV", Devil: "XV", Tower: "XVI",
+    Star: "XVII", Moon: "XVIII", Sun: "XIX", Judgement: "XX", Faith: "F", Councillor: "C", World: "XXI" };
+  var ARCANA_HUE = {};
+  ARCANA.forEach(function (a, i) { ARCANA_HUE[a] = Math.round((i * 360 / ARCANA.length + 350) % 360); });
+
+  // ---------- data model ----------
+  var ALL = Object.keys(D.P).map(function (name, idx) {
+    var p = D.P[name];
+    return { name: name, idx: idx, level: p.l, arcana: p.a, stats: p.s, elems: p.e, trait: p.t, skills: p.k, inherits: p.i,
+      special: !!p.special, rare: !!p.rare, dlc: !!p.dlc, max: !!p.mx, slug: slugify(name) };
+  });
+  var BY_NAME = {}, BY_SLUG = {};
+  ALL.forEach(function (p) { BY_NAME[p.name] = p; BY_SLUG[p.slug] = p; });
+  var ARC_TABLE = {};
+  D.arc.forEach(function (c) { ARC_TABLE[c[0] + "|" + c[1]] = c[2]; ARC_TABLE[c[1] + "|" + c[0]] = c[2]; });
+  var SPECIAL = {}; // result name -> [source names]
+  D.sp.forEach(function (c) { SPECIAL[c[0]] = c[1]; });
+  var SPECIAL2 = D.sp.filter(function (c) { return c[1].length === 2; });
+
+  function slugify(s) {
+    return "p-" + s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  }
+  function cost(list) {
+    return list.reduce(function (s, p) { return s + 27 * p.level * p.level + 126 * p.level + 2147; }, 0);
+  }
+
+  var STORE_KEY = "p5r-fusion-dlc";
+  var dlcOn = false;
+  try { dlcOn = localStorage.getItem(STORE_KEY) === "1"; } catch (e) {}
+
+  // Engine state, rebuilt whenever the DLC setting changes.
+  var POOL, BY_ARC, RECIPES, USED_IN;
+
+  function build() {
+    POOL = ALL.filter(function (p) { return dlcOn || !p.dlc; });
+    BY_ARC = {};
+    POOL.forEach(function (p) { (BY_ARC[p.arcana] = BY_ARC[p.arcana] || []).push(p); });
+    Object.keys(BY_ARC).forEach(function (a) { BY_ARC[a].sort(function (x, y) { return x.level - y.level || x.idx - y.idx; }); });
+    RECIPES = {}; USED_IN = {};
+    ALL.forEach(function (p) { RECIPES[p.name] = []; USED_IN[p.name] = []; });
+    for (var i = 0; i < POOL.length; i++) {
+      for (var j = i + 1; j < POOL.length; j++) {
+        var a = POOL[i], b = POOL[j], r = fuse(a, b);
+        if (!r || r === a || r === b) continue;
+        var src = a.level >= b.level ? [a, b] : [b, a];
+        var rec = { sources: src, result: r, cost: cost(src) };
+        RECIPES[r.name].push(rec);
+        USED_IN[a.name].push(rec); USED_IN[b.name].push(rec);
+      }
+    }
+    // Multi-ingredient special fusions (3 to 6 personas).
+    Object.keys(SPECIAL).forEach(function (res) {
+      var names = SPECIAL[res];
+      if (names.length < 3) return;
+      var src = names.map(function (n) { return BY_NAME[n]; }).sort(function (x, y) { return y.level - x.level; });
+      var rec = { sources: src, result: BY_NAME[res], cost: cost(src), special: true };
+      RECIPES[res].push(rec);
+      src.forEach(function (s) { USED_IN[s.name].push(rec); });
+    });
+    Object.keys(RECIPES).forEach(function (k) {
+      RECIPES[k].sort(function (x, y) { return x.cost - y.cost; });
+      USED_IN[k].sort(function (x, y) { return x.result.level - y.result.level || x.cost - y.cost; });
+    });
+  }
+
+  function fuse(p1, p2) {
+    for (var i = 0; i < SPECIAL2.length; i++) {
+      var s = SPECIAL2[i][1];
+      if ((p1.name === s[0] && p2.name === s[1]) || (p1.name === s[1] && p2.name === s[0])) return BY_NAME[SPECIAL2[i][0]];
+    }
+    if (p1.rare !== p2.rare) return fuseRare(p1.rare ? p1 : p2, p1.rare ? p2 : p1);
+    return fuseNormal(p1, p2);
+  }
+  function fuseNormal(p1, p2) {
+    var level = 1 + Math.floor((p1.level + p2.level) / 2);
+    var arcana = ARC_TABLE[p1.arcana + "|" + p2.arcana];
+    if (!arcana) return null;
+    var list = BY_ARC[arcana] || [], p, i;
+    if (p1.arcana === p2.arcana) {
+      for (i = list.length - 1; i >= 0; i--) {
+        p = list[i];
+        if (p.level <= level) {
+          if (p.special || p.rare || p === p1 || p === p2) continue;
+          return p;
+        }
+      }
+    } else {
+      for (i = 0; i < list.length; i++) {
+        p = list[i];
+        if (p.level >= level) {
+          if (p.special || p.rare) continue;
+          return p;
+        }
+      }
+    }
+    return null;
+  }
+  function fuseRare(rare, main) {
+    var mod = D.rareC[main.arcana][D.rare.indexOf(rare.name)];
+    var list = BY_ARC[main.arcana] || [];
+    var at = list.indexOf(main);
+    var np = list[at + mod];
+    if (!np) return null;
+    while (np && (np.special || np.rare)) {
+      if (mod > 0) mod++; else if (mod < 0) mod--;
+      np = list[at + mod];
+    }
+    return np || null;
+  }
+
+  // ---------- rendering helpers ----------
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function initials(name) {
+    var w = name.replace(/[^A-Za-zÀ-ɏ\s-]/g, "").split(/[\s-]+/).filter(Boolean);
+    return (w.length > 1 ? w[0][0] + w[1][0] : w[0].slice(0, 2)).toUpperCase();
+  }
+  function glyph(p, size) {
+    var h = ARCANA_HUE[p.arcana] || 0;
+    var w = size, ht = Math.round(size * 1.45);
+    var c1 = "hsl(" + h + " 70% 42%)", c2 = "hsl(" + ((h + 30) % 360) + " 75% 28%)";
+    var gid = "g" + p.idx + "-" + size;
+    return '<svg class="glyph" width="' + w + '" height="' + ht + '" viewBox="0 0 40 58" role="img" aria-label="' + esc(p.arcana) + ' arcana">' +
+      '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + c1 + '"/><stop offset="1" stop-color="' + c2 + '"/></linearGradient></defs>' +
+      '<path d="M4 1 H39 L36 57 H1 Z" fill="url(#' + gid + ')"/>' +
+      '<path d="M7 4 H35.5 L33 54 H4.5 Z" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="1"/>' +
+      '<text x="20" y="15" text-anchor="middle" font-size="9" fill="#ffffff" fill-opacity=".85">' + NUMERAL[p.arcana] + '</text>' +
+      '<text x="19.5" y="40" text-anchor="middle" font-size="18" fill="#ffffff">' + esc(initials(p.name)) + '</text>' +
+      (p.rare ? '<circle cx="20" cy="49" r="2.2" fill="#ffd34d"/>' : p.special ? '<path d="M20 46 l2 3 -2 3 -2 -3 z" fill="#ffffff"/>' : "") +
+      '</svg>';
+  }
+  function badges(p) {
+    var b = "";
+    if (p.special) b += '<span class="bd special" title="Special (multi-persona) fusion">Special</span>';
+    if (p.rare) b += '<span class="bd rare" title="Treasure Demon: cannot be fused">Treasure</span>';
+    if (p.dlc) b += '<span class="bd dlc" title="Paid DLC persona">DLC</span>';
+    if (p.max) b += '<span class="bd mx" title="Requires the Confidant to be maxed">Max Confidant</span>';
+    return b;
+  }
+  function chip(p, cls) {
+    return '<a class="pchip' + (cls ? " " + cls : "") + '" href="#' + p.slug + '"><b class="plv">' + p.level + '</b><span>' + esc(p.name) +
+      ' <small>' + esc(p.arcana) + '</small></span></a>';
+  }
+  function yen(n) { return "≈ ¥" + n.toLocaleString("en-US"); }
+
+  // ---------- views ----------
+  var app = document.getElementById("app");
+  var trail = []; // breadcrumb of persona names
+  var listState = { q: "", arcana: "" };
+  var detailState = { mode: "recipes", q: "", limit: 60 };
+
+  function setTab(tab) {
+    document.querySelectorAll("nav.tabs a").forEach(function (a) {
+      if (a.getAttribute("data-tab") === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+  }
+
+  function dlcToggle() {
+    return '<label class="toggle"><input type="checkbox" id="dlc" ' + (dlcOn ? "checked" : "") + '> Include DLC personas</label>';
+  }
+  function bindDlc() {
+    var el = document.getElementById("dlc");
+    if (!el) return;
+    el.addEventListener("change", function () {
+      dlcOn = el.checked;
+      try { localStorage.setItem(STORE_KEY, dlcOn ? "1" : "0"); } catch (e) {}
+      build(); route();
+    });
+  }
+
+  function renderList() {
+    setTab("reverse");
+    trail = [];
+    var opts = ARCANA.map(function (a) { return '<option value="' + a + '"' + (listState.arcana === a ? " selected" : "") + '>' + a + '</option>'; }).join("");
+    app.innerHTML =
+      '<div class="crumbs"><span class="here">All personas</span></div>' +
+      '<div class="sec-head" style="margin-top:0"><h2>Compendium by level</h2><span class="count" id="cnt"></span></div>' +
+      '<p class="note">Pick any persona to see every pair of personas that fuses into it. Every name on the next screen is a link, so you can keep drilling into ingredients.</p>' +
+      '<div class="controls"><input type="search" id="q" placeholder="Search name or arcana" value="' + esc(listState.q) + '" aria-label="Search personas">' +
+      '<select id="arc" aria-label="Filter by arcana"><option value="">All arcana</option>' + opts + '</select>' + dlcToggle() + '</div>' +
+      '<div class="list" id="rows"></div>';
+    var q = document.getElementById("q"), arc = document.getElementById("arc");
+    function draw() {
+      listState.q = q.value; listState.arcana = arc.value;
+      var t = q.value.trim().toLowerCase();
+      var items = ALL.slice().sort(function (a, b) { return a.level - b.level || a.name.localeCompare(b.name); }).filter(function (p) {
+        if (arc.value && p.arcana !== arc.value) return false;
+        if (t && p.name.toLowerCase().indexOf(t) < 0 && p.arcana.toLowerCase().indexOf(t) < 0) return false;
+        return true;
+      });
+      document.getElementById("cnt").textContent = items.length + " personas";
+      document.getElementById("rows").innerHTML = items.length ? items.map(function (p) {
+        var off = p.dlc && !dlcOn;
+        var n = RECIPES[p.name].length;
+        var sub = p.rare ? "Treasure Demon · not fusable" : off ? "DLC · turn on DLC to fuse" : p.special ? "Special fusion" : n + " recipe" + (n === 1 ? "" : "s");
+        return '<a class="row' + (off ? " off" : "") + '" href="#' + p.slug + '"><span class="lv">Lv <b>' + p.level + '</b></span>' + glyph(p, 26) +
+          '<span class="nm">' + esc(p.name) + '<small>' + esc(p.arcana) + ' · ' + sub + '</small></span><span class="badges">' + badges(p) + '</span></a>';
+      }).join("") : '<div class="empty">No persona matches that search.</div>';
+    }
+    q.addEventListener("input", draw); arc.addEventListener("change", draw);
+    bindDlc(); draw();
+  }
+
+  function renderDetail(p) {
+    setTab("reverse");
+    var at = trail.indexOf(p.name);
+    if (at >= 0) trail = trail.slice(0, at + 1); else trail.push(p.name);
+    var crumbs = '<a href="#">All personas</a>' + trail.map(function (n, i) {
+      var q = BY_NAME[n];
+      return '<span class="sep">›</span>' + (i === trail.length - 1 ? '<span class="here">' + esc(n) + '</span>' : '<a href="#' + q.slug + '">' + esc(n) + '</a>');
+    }).join("");
+
+    var maxStat = 99;
+    var stats = p.stats.map(function (v, i) {
+      return '<div class="stat"><span class="k">' + STATS[i] + '</span><span class="v">' + v + '</span><span class="bar"><i style="width:' + Math.min(100, v / maxStat * 100) + '%"></i></span></div>';
+    }).join("");
+    var elems = p.elems.map(function (v, i) {
+      var e = ELV[v] || ["none", v];
+      return '<div class="el" title="' + ELEMS[i] + ": " + e[1] + '"><span class="k">' + ELEMS[i] + '</span><span class="v ' + e[0] + '">' + (v === "-" ? "–" : v === "ab" ? "dr" : v) + '</span></div>';
+    }).join("");
+    var skills = Object.keys(p.skills).map(function (k) {
+      var l = p.skills[k];
+      return '<span class="sk">' + esc(k) + '<b>' + (l === 0 ? "innate" : "Lv " + l) + '</b></span>';
+    }).join("");
+
+    app.innerHTML =
+      '<div class="crumbs">' + crumbs + '</div>' +
+      '<section class="sheet">' + glyph(p, 92) +
+      '<div><h1>' + esc(p.name) + '</h1>' +
+      '<div class="meta"><span><strong>' + esc(p.arcana) + '</strong> arcana</span><span>Base level <strong>' + p.level + '</strong></span>' +
+      (p.trait ? '<span>Trait <strong>' + esc(p.trait) + '</strong></span>' : "") + (p.inherits ? '<span>Inherits <strong>' + esc(p.inherits) + '</strong></span>' : "") +
+      '<span class="badges">' + badges(p) + '</span></div>' +
+      '<div class="statgrid"><div><p class="sublabel">Base stats</p><div class="stats">' + stats + '</div></div>' +
+      '<div><p class="sublabel">Affinities</p><div class="elems">' + elems + '</div><div class="legend">wk weak · rs resist · nu null · rp repel · dr drain</div></div></div>' +
+      '<p class="sublabel" style="margin-top:16px">Skills</p><div class="skills" style="margin-top:0">' + skills + '</div>' +
+      '</div></section>' +
+      '<div class="sec-head"><div class="seg" role="group" aria-label="Recipe direction">' +
+      '<button type="button" data-mode="recipes" aria-pressed="' + (detailState.mode === "recipes") + '">Fused from (' + RECIPES[p.name].length + ')</button>' +
+      '<button type="button" data-mode="used" aria-pressed="' + (detailState.mode === "used") + '">Fuses into (' + USED_IN[p.name].length + ')</button></div>' +
+      dlcToggle() + '</div>' +
+      '<div class="controls"><input type="search" id="rq" placeholder="Filter by ingredient or arcana" value="' + esc(detailState.q) + '" aria-label="Filter recipes"><span class="count" id="rcnt"></span></div>' +
+      '<p class="note" id="rnote"></p><div class="recipes" id="rlist"></div><div id="rmore"></div>';
+
+    var rq = document.getElementById("rq");
+    function draw() {
+      detailState.q = rq.value;
+      var t = rq.value.trim().toLowerCase();
+      var used = detailState.mode === "used";
+      var src = used ? USED_IN[p.name] : RECIPES[p.name];
+      var items = src.filter(function (r) {
+        if (!t) return true;
+        return r.sources.concat([r.result]).some(function (s) { return s !== p && (s.name.toLowerCase().indexOf(t) >= 0 || s.arcana.toLowerCase().indexOf(t) >= 0); });
+      });
+      var note;
+      if (used) note = "Every 2-persona fusion that uses " + p.name + ", plus any special fusion it belongs to. Sorted by result level.";
+      else if (p.rare) note = "Treasure Demons cannot be fused. Find " + p.name + " in Mementos, then use it as an ingredient to shift results within an arcana.";
+      else if (p.dlc && !dlcOn) note = p.name + " is a DLC persona. Turn on Include DLC personas to see its recipe.";
+      else if (p.special) note = p.name + " is a special fusion with one fixed recipe" + (SPECIAL[p.name] && SPECIAL[p.name].length > 2 ? " in the Gallows (Advanced fusion)." : ".");
+      else note = "Every pair that fuses into " + p.name + ", cheapest first. Order doesn't matter, so A + B and B + A are one recipe. Costs are approximate.";
+      if (p.max && !used) note += " This persona needs its Confidant maxed before you can fuse it.";
+      document.getElementById("rnote").textContent = note;
+      document.getElementById("rcnt").textContent = items.length + (items.length === 1 ? " recipe" : " recipes") + (t ? " match" : "");
+      var shown = items.slice(0, detailState.limit);
+      document.getElementById("rlist").innerHTML = shown.length ? shown.map(function (r) {
+        var parts = r.sources.map(function (s) { return s === p ? chip(s, "result") : chip(s); }).join('<span class="op">+</span>');
+        if (used) parts += '<span class="op">=</span>' + chip(r.result);
+        return '<div class="recipe">' + parts + '<span class="cost">' + (r.special ? "Special · " : "") + yen(r.cost) + '</span></div>';
+      }).join("") : (src.length ? '<div class="empty">No recipe matches that filter.</div>' : "");
+      var rest = items.length - shown.length;
+      document.getElementById("rmore").innerHTML = rest > 0 ? '<button type="button" class="more" id="more">Show ' + Math.min(rest, 120) + ' more of ' + rest + '</button>' : "";
+      var m = document.getElementById("more");
+      if (m) m.addEventListener("click", function () { detailState.limit += 120; draw(); });
+    }
+    rq.addEventListener("input", function () { detailState.limit = 60; draw(); });
+    app.querySelectorAll(".seg button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        detailState.mode = b.getAttribute("data-mode"); detailState.limit = 60;
+        app.querySelectorAll(".seg button").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+        draw();
+      });
+    });
+    bindDlc(); draw();
+  }
+
+  var fuseState = { a: "Pixie", b: "Jack Frost" };
+  function renderFuse() {
+    setTab("fuse");
+    var sorted = POOL.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+    function opts(sel) { return sorted.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === sel ? " selected" : "") + '>' + esc(p.name) + ' (Lv ' + p.level + ' ' + p.arcana + ')</option>'; }).join(""); }
+    if (!BY_NAME[fuseState.a] || (BY_NAME[fuseState.a].dlc && !dlcOn)) fuseState.a = "Pixie";
+    if (!BY_NAME[fuseState.b] || (BY_NAME[fuseState.b].dlc && !dlcOn)) fuseState.b = "Jack Frost";
+    app.innerHTML =
+      '<div class="crumbs"><span class="here">Fuse two personas</span></div>' +
+      '<div class="sec-head" style="margin-top:0"><h2>Forward fusion</h2>' + dlcToggle() + '</div>' +
+      '<p class="note">Choose two personas to see what they make. Click any result to open its full recipe list.</p>' +
+      '<div class="fuse-grid"><label for="fa">First persona<select id="fa">' + opts(fuseState.a) + '</select></label><span class="op">+</span>' +
+      '<label for="fb">Second persona<select id="fb">' + opts(fuseState.b) + '</select></label></div>' +
+      '<div class="fuse-out" id="fout"></div>';
+    var fa = document.getElementById("fa"), fb = document.getElementById("fb");
+    function draw() {
+      fuseState.a = fa.value; fuseState.b = fb.value;
+      var a = BY_NAME[fa.value], b = BY_NAME[fb.value], out = document.getElementById("fout");
+      if (a === b) { out.innerHTML = '<span class="note" style="margin:0">A persona can’t be fused with itself. Pick two different personas.</span>'; return; }
+      var r = fuse(a, b);
+      out.innerHTML = chip(a) + '<span class="eq">+</span>' + chip(b) + '<span class="eq">=</span>' +
+        (r && r !== a && r !== b ? chip(r, "result") + '<span class="cost" style="margin-left:auto">' + yen(cost([a, b])) + '</span>' : '<span class="note" style="margin:0">These two don’t fuse into anything.</span>');
+    }
+    fa.addEventListener("change", draw); fb.addEventListener("change", draw);
+    bindDlc(); draw();
+  }
+
+  var lastView = null;
+  function route() {
+    var h = decodeURIComponent(location.hash.replace(/^#/, ""));
+    var view = h;
+    if (h === "fuse") renderFuse();
+    else if (BY_SLUG[h]) {
+      if (lastView !== h) { detailState.q = ""; detailState.limit = 60; detailState.mode = "recipes"; }
+      renderDetail(BY_SLUG[h]);
+    } else { view = ""; renderList(); }
+    if (lastView !== view) window.scrollTo(0, 0);
+    lastView = view;
+  }
+
+  build();
+  window.addEventListener("hashchange", route);
+  route();
+})();
+</script>
