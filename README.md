@@ -6,7 +6,7 @@ A splash page (`index.html`) that links to each small web app built so far. Ever
 |---|---|---|
 | Hush | `apps/hush/` | Silent speech: mouth words at the camera, get text. On-device lip reading. |
 | P5R Fusion Calc | `apps/p5r-fusion/` | Persona 5 Royal reverse fusion calculator. |
-| Trump Tweets | – | Coming soon: listed on the splash page, but its code isn't in this repo yet. |
+| Trump Tweets | `apps/trump-tweets/` | Running feed of @realDonaldTrump's Truth Social posts. |
 
 ## Run it locally
 
@@ -15,7 +15,7 @@ A splash page (`index.html`) that links to each small web app built so far. Ever
 npx serve _site               # then open the printed URL
 ```
 
-Opening `index.html` straight from disk also works for the splash page and P5R. Hush needs HTTPS (or localhost) for camera access.
+Opening `index.html` straight from disk also works for the splash page, P5R and Trump Tweets. Hush needs HTTPS (or localhost) for camera access.
 
 ## Publish
 

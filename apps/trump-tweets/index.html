@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trump Tweets</title>
+<meta name="description" content="A running feed of @realDonaldTrump's Truth Social posts, refreshed every minute.">
+<meta name="theme-color" content="#c2410c">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main>
+  <a class="back" href="../../">← My Webapps</a>
+  <header class="feed-head">
+    <div>
+      <h1>@realDonaldTrump on Truth Social</h1>
+      <p class="fine" id="feedStatus">Loading…</p>
+    </div>
+    <button class="btn" id="feedRefresh" aria-label="Refresh feed">Refresh</button>
+  </header>
+  <div id="newBanner" class="new-banner" hidden></div>
+  <div id="feedList" class="feed-list" aria-live="polite"></div>
+  <p class="fine feed-note">Posts are collected every ~5 minutes from public sources and shown as plain text. Tap “Open” to see the original on Truth Social.</p>
+</main>
+<script src="./app.js"></script>
+</body>
+</html>
