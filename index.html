@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Webapps</title>
+<meta name="description" content="A launcher for the small web apps built so far.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #f4f2ee;
+  --surface: #ffffff;
+  --ink: #17161a;
+  --muted: #6b6870;
+  --line: #e2ded7;
+  --focus: #3b5bdb;
+  --shadow: 0 1px 2px rgba(23, 22, 26, .06), 0 8px 24px rgba(23, 22, 26, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121115;
+    --surface: #1c1b20;
+    --ink: #f1eff4;
+    --muted: #9c98a3;
+    --line: #2e2c33;
+    --focus: #8ea4ff;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121115; --surface: #1c1b20; --ink: #f1eff4; --muted: #9c98a3; --line: #2e2c33; --focus: #8ea4ff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 16px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-height: 100vh;
+}
+main { max-width: 960px; margin: 0 auto; padding: 56px 16px 64px; }
+header { margin-bottom: 36px; }
+h1 {
+  font: 600 clamp(36px, 7vw, 56px)/1.05 Fraunces, Georgia, serif;
+  letter-spacing: -.02em;
+  margin: 0 0 10px;
+}
+header p { margin: 0; color: var(--muted); max-width: 46ch; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+a.card:hover { transform: translateY(-2px); }
+a.card:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.band {
+  height: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+}
+.band svg { width: 44px; height: 44px; }
+.body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.body h2 { font-size: 18px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; }
+.body p { margin: 0; color: var(--muted); font-size: 14.5px; }
+.tag {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.soon { opacity: .7; }
+.soon .band { filter: grayscale(.6); }
+.pill {
+  font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; color: var(--muted);
+}
+footer { margin-top: 40px; color: var(--muted); font-size: 13.5px; }
+@media (prefers-reduced-motion: reduce) { .card { transition: none; } a.card:hover { transform: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>My Webapps</h1>
+    <p>Everything built so far. Tap an app to open it.</p>
+  </header>
+  <ul class="grid" id="apps"></ul>
+  <footer id="count"></footer>
+</main>
+
+<script>
+// The app registry. To add an app: put it in apps/<slug>/ and add one entry here.
+// status: "live" (clickable) or "soon" (shown greyed out, not clickable).
+const APPS = [
+  {
+    slug: "hush",
+    name: "Hush",
+    blurb: "Silent speech: mouth words at your phone's camera and Hush turns them into text. Runs fully on-device.",
+    tag: "Voice · Camera · Works offline",
+    accent: "#5b4fe0",
+    icon: "mic",
+    status: "live",
+  },
+  {
+    slug: "trump-tweets",
+    name: "Trump Tweets",
+    blurb: "Not in this repo yet. Its code needs to be added before it can open.",
+    tag: "Text",
+    accent: "#c2410c",
+    icon: "chat",
+    status: "soon",
+  },
+  {
+    slug: "p5r-fusion",
+    name: "P5R Fusion Calc",
+    blurb: "Persona 5 Royal reverse fusion calculator: every recipe for a persona, and what two personas fuse into.",
+    tag: "Game tool · 232 personas",
+    accent: "#d0021b",
+    icon: "spark",
+    status: "live",
+  },
+];
+
+const ICONS = {
+  mic: '<path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8M8 12h5"/>',
+  spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+};
+
+const list = document.getElementById("apps");
+for (const app of APPS) {
+  const live = app.status === "live";
+  const li = document.createElement("li");
+  const card = document.createElement(live ? "a" : "div");
+  card.className = "card" + (live ? "" : " soon");
+  if (live) card.href = `apps/${app.slug}/`;
+  card.style.setProperty("--accent", app.accent);
+  card.innerHTML = `
+    <div class="band" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[app.icon] || ICONS.grid}</svg>
+    </div>
+    <div class="body">
+      <h2></h2>
+      <p></p>
+      <span class="tag"></span>
+    </div>`;
+  card.querySelector("h2").textContent = app.name;
+  if (!live) card.querySelector("h2").insertAdjacentHTML("beforeend", '<span class="pill">Coming soon</span>');
+  card.querySelector("p").textContent = app.blurb;
+  card.querySelector(".tag").textContent = app.tag;
+  li.append(card);
+  list.append(li);
+}
+const n = APPS.filter((a) => a.status === "live").length;
+document.getElementById("count").textContent = `${n} app${n === 1 ? "" : "s"} live`;
+</script>
+</body>
+</html>
