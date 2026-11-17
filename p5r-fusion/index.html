@@ -249,6 +249,7 @@ footer a { color: var(--muted); }
     Object.keys(SPECIAL).forEach(function (res) {
       var names = SPECIAL[res];
       if (names.length < 3) return;
+      if (!dlcOn && (BY_NAME[res].dlc || names.some(function (n) { return BY_NAME[n].dlc; }))) return;
       var src = names.map(function (n) { return BY_NAME[n]; }).sort(function (x, y) { return y.level - x.level; });
       var rec = { sources: src, result: BY_NAME[res], cost: cost(src), special: true };
       RECIPES[res].push(rec);
@@ -481,6 +482,7 @@ footer a { color: var(--muted); }
   var fuseState = { a: "Pixie", b: "Jack Frost" };
   function renderFuse() {
     setTab("fuse");
+    trail = [];
     var sorted = POOL.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
     function opts(sel) { return sorted.map(function (p) { return '<option value="' + esc(p.name) + '"' + (p.name === sel ? " selected" : "") + '>' + esc(p.name) + ' (Lv ' + p.level + ' ' + p.arcana + ')</option>'; }).join(""); }
     if (!BY_NAME[fuseState.a] || (BY_NAME[fuseState.a].dlc && !dlcOn)) fuseState.a = "Pixie";

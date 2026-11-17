@@ -15,3 +15,5 @@ Fusion rules (normal, same-arcana down-rank, Treasure Demon, and special fusions
 python3 src/convert.py <dir with PersonaDataRoyal.js and Data5Royal.js> src/data.json   # refresh data
 python3 src/build.py                                                                     # inline data -> index.html
 ```
+
+`index.html` is written for the claude.ai Artifact host, which adds the `<!doctype html>` wrapper; it also works opened directly in a browser.
