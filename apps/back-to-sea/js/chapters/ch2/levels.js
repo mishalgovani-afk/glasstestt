@@ -18,11 +18,13 @@ function l21() {
     hint: 'The kitchen drain dumped you in a mop bucket. Touch a bubble!',
     map: g.out(),
     decor: [
+      { type: 'window', x: 22, y: 2, w: 3, h: 4 },
+      { type: 'pipe', x: 0, y: 5, w: 4, h: 5 },
       { type: 'bucket', x: 2, y: 10, w: 6, h: 4, hideTiles: true },
       { type: 'cabinet', x: 19, y: 8, w: 8, h: 6, hideTiles: true },
       { type: 'vanity', x: 33, y: 9, w: 14, h: 5, hideTiles: true, basin: [37, 42] },
-      { type: 'pipe', x: 0, y: 5, w: 4, h: 5 },
       { type: 'mirror', x: 34, y: 2, w: 8, h: 5 },
+      { type: 'mat', x: 9, y: 13, w: 4, h: 1 },
     ],
     says: [
       { x: 12, text: 'Touch a bubble to float up. MOVE steers it.' },
@@ -50,7 +52,24 @@ function l22(hx = 27) {
   return {
     id: '2-2', name: 'Soap Dish Shelf', budget: 60,
     hint: 'Soap dishes blow bubbles on a beat. Wait in the dish to catch one.',
-    map: g.out(), decor: [], says: [],
+    map: g.out(),
+    decor: [
+      { type: 'window', x: 34, y: 2, w: 3, h: 5 },
+      { type: 'mirror', x: 2, y: 5, w: 5, h: 5 },
+      { type: 'towels', x: 46, y: 9, w: 3, h: 2 },
+      { type: 'cabinet', x: 0, y: 13, w: 14, h: 4, hideTiles: true, plain: true },
+      { type: 'cup', x: 2, y: 11, w: 5, h: 2, hideTiles: true },
+      { type: 'bottles', x: 12, y: 12, w: 2, h: 1 },
+      { type: 'bottles', x: 16, y: 7, w: 3, h: 1 },
+      { type: 'hamper', x: 27, y: 12, w: 7, h: 5, hideTiles: true },
+      { type: 'toilet', x: 38, y: 9, w: 7, h: 8, hideTiles: true },
+    ],
+    says: [
+      { x: 6, text: 'Stand in the soap dish. It blows a bubble every few seconds.' },
+      { x: 15, y: 9, text: 'Glass shelves: jump up through them from below.' },
+      { x: 24, text: 'Missed? Bubbles on the floor will lift you back up.' },
+      { x: 36, text: 'The toilet tank is a clean pool. Dive in!' },
+    ],
   };
 }
 
@@ -79,7 +98,22 @@ function l23() {
   return {
     id: '2-3', name: 'Shower Stall', budget: 65,
     hint: 'Showers keep you wet, but they pop any bubble that touches them.',
-    map: g.out(), props: { '42,3': { period: 4, on: 2.4 } }, decor: [], says: [],
+    map: g.out(), props: { '42,3': { period: 4, on: 2.4 } },
+    decor: [
+      { type: 'curtain', x: 0, y: 2, w: 9, h: 14 },
+      { type: 'window', x: 21, y: 1, w: 3, h: 4 },
+      { type: 'mat', x: 13, y: 16, w: 6, h: 1 },
+      { type: 'bottles', x: 36, y: 8, w: 1, h: 1 },
+      { type: 'tub', x: 46, y: 11, w: 15, h: 7, depth: 6, hideTiles: true },
+      { type: 'foam', x: 47, y: 12, w: 13, h: 1 },
+      { type: 'towels', x: 62, y: 8, w: 3, h: 2 },
+    ],
+    says: [
+      { x: 5, text: 'Bubble over the wall! Hold MOVE to steer.' },
+      { x: 14, text: 'Showers keep you wet. Stand in one to refill.' },
+      { x: 24, text: 'A shower pops any bubble that touches it.' },
+      { x: 40, text: 'This shower pulses. Wait for a dry moment.' },
+    ],
   };
 }
 
@@ -95,14 +129,29 @@ function l24() {
   g.set(2, 27, 'S').set(3, 27, '-').set(4, 27, '-').set(15, 27, 'o');
   g.set(7, 25, 'B');                                   // under hole 1
   g.set(19, 21, 'M').set(14, 20, 'o');                 // dish under hole 2
-  g.set(3, 15, 'C').set(9, 14, 'B');                   // checkpoint; bubble under hole 3 (the ceiling is 3 tiles up)
+  g.set(12, 15, 'C').set(9, 14, 'B');                   // checkpoint; bubble under hole 3 (the ceiling is 3 tiles up)
   g.set(23, 9, 'M').set(14, 6, 'D');                   // dish under hole 4; tap over tier 3
   g.fill(13, 5, 15, 5, '#');
   g.fill(27, 2, 27, 3, '#').fill(32, 2, 32, 3, '#').fill(28, 2, 31, 3, '~').set(29, 3, 'E'); // tooth glass
   return {
     id: '2-4', name: 'Medicine Cabinet', budget: 70,
     hint: 'Steer your bubble up through the holes. Bump a ceiling and it pops!',
-    map: g.out(), decor: [], says: [],
+    map: g.out(),
+    decor: [
+      { type: 'towels', x: 20, y: 23, w: 4, h: 2 },
+      { type: 'mirror', x: 24, y: 17, w: 4, h: 3 },
+      { type: 'bottles', x: 10, y: 21, w: 3, h: 1 },
+      { type: 'window', x: 26, y: 11, w: 3, h: 4 },
+      { type: 'medcab', x: 22, y: 5, w: 4, h: 3 },
+      { type: 'mirror', x: 3, y: 0, w: 6, h: 3 },
+      { type: 'cup', x: 27, y: 2, w: 6, h: 2, hideTiles: true },
+    ],
+    says: [
+      { x: 4, y: 26, text: 'Steer into the hole! Bump the ceiling and the bubble pops.' },
+      { x: 16, y: 20, text: 'Wait in the dish for the next bubble.' },
+      { x: 8, y: 14, text: 'The ceiling is low here. Pop before you bump it.' },
+      { x: 24, y: 3, text: 'The tooth glass! Dive in.' },
+    ],
   };
 }
 
@@ -127,7 +176,23 @@ function l25() {
   return {
     id: '2-5', name: 'Steam Room', budget: 80, steamy: true,
     hint: 'Scalding vents! Float over them. Air currents push bubbles sideways.',
-    map: g.out(), props: { '30,5': { w: 12, h: 5, vx: 24 }, '48,5': { w: 12, h: 5, vx: 24 } }, decor: [], says: [],
+    map: g.out(), props: { '30,5': { w: 12, h: 5, vx: 24 }, '48,5': { w: 12, h: 5, vx: 24 } },
+    decor: [
+      { type: 'window', x: 10, y: 2, w: 3, h: 4 },
+      { type: 'window', x: 40, y: 2, w: 3, h: 4 },
+      { type: 'cabinet', x: 15, y: 11, w: 2, h: 4, hideTiles: true, plain: true },
+      { type: 'cabinet', x: 34, y: 10, w: 2, h: 5, hideTiles: true, plain: true },
+      { type: 'cabinet', x: 43, y: 11, w: 2, h: 4, hideTiles: true, plain: true },
+      { type: 'cabinet', x: 52, y: 10, w: 2, h: 5, hideTiles: true, plain: true },
+      { type: 'towels', x: 20, y: 6, w: 3, h: 2 },
+      { type: 'tub', x: 63, y: 9, w: 7, h: 6, depth: 3, hideTiles: true },
+      { type: 'foam', x: 64, y: 10, w: 5, h: 1 },
+    ],
+    says: [
+      { x: 6, text: 'Scalding vents on the floor! Touch one and you faint.' },
+      { x: 29, text: 'Air currents push bubbles sideways.' },
+      { x: 60, text: 'One more bubble up to the tub.' },
+    ],
   };
 }
 
@@ -138,17 +203,16 @@ function l26() {
   g.set(2, 16, 'S').set(3, 16, '-').set(4, 16, '-').set(7, 16, 'o');
   g.set(8, 14, 'B');                                   // over the first partition
   g.fill(11, 11, 12, 16, '#');                         // partition 1 (stand row 10)
-  g.set(16, 6, 'H');                                   // stream 1: refills you on the floor
-  g.fill(18, 12, 23, 12, '=').set(23, 11, 'M');        // shelf (stand row 11)
+  g.set(15, 6, 'H');                                   // stream 1: refills you on the floor
+  g.fill(17, 12, 23, 12, '=').set(23, 11, 'M');        // shelf (stand row 11)
   g.set(26, 5, 'H');                                   // stream 2: pulsing
-  g.fill(29, 9, 30, 16, '#').set(30, 8, 'M');          // partition 2 (stand row 8)
-  g.set(33, 16, 'C');
+  g.fill(29, 9, 30, 16, '#').set(30, 8, 'M').set(29, 8, 'C');          // partition 2 (stand row 8)
   g.puts(16, 35, '^^^^^^^^^^^^^^^^');                  // vents (cols 35..50)
-  g.fill(39, 12, 40, 16, '#').set(40, 11, 'M');        // pedestal A
+  g.fill(37, 12, 38, 16, '#').set(38, 11, 'M');        // pedestal A
   g.fill(46, 12, 47, 16, '#').set(47, 11, 'M');        // pedestal B
   g.set(36, 6, 'W');
   g.puts(8, 42, '^^^');                                // hot pipe overhead
-  g.set(54, 16, 'C').set(53, 13, 'o');
+  g.set(55, 16, 'C').set(53, 13, 'o');
   g.fill(52, 11, 61, 11, '#').fill(56, 11, 58, 11, '.'); // cabinet floor with a hole
   g.set(57, 16, 'M');                                  // dish under the hole
   g.set(60, 7, 'D').fill(60, 6, 60, 6, '#');
@@ -160,8 +224,23 @@ function l26() {
     id: '2-6', name: 'Down the Drain', budget: 90,
     hint: 'Everything at once. The tub plug is the way out!',
     map: g.out(),
-    props: { '16,6': {}, '26,5': { period: 4, on: 2.4 }, '36,6': { w: 12, h: 5, vx: 24 } },
-    decor: [], says: [],
+    props: { '15,6': {}, '26,5': { period: 4, on: 2.4 }, '36,6': { w: 12, h: 5, vx: 24 } },
+    decor: [
+      { type: 'curtain', x: 0, y: 2, w: 9, h: 14 },
+      { type: 'window', x: 44, y: 1, w: 3, h: 4 },
+      { type: 'mat', x: 13, y: 16, w: 4, h: 1 },
+      { type: 'cabinet', x: 37, y: 12, w: 2, h: 5, hideTiles: true, plain: true },
+      { type: 'cabinet', x: 46, y: 12, w: 2, h: 5, hideTiles: true, plain: true },
+      { type: 'towels', x: 40, y: 3, w: 4, h: 2 },
+      { type: 'tub', x: 65, y: 10, w: 19, h: 8, depth: 7, hideTiles: true },
+      { type: 'foam', x: 66, y: 11, w: 17, h: 1 },
+    ],
+    says: [
+      { x: 6, text: 'Last bathroom. Everything you learned, all at once.' },
+      { x: 35, text: 'Hot vents ahead. Use the pedestals.' },
+      { x: 52, text: 'Steer up through the hole in the cabinet top.' },
+      { x: 66, text: 'Dive down to the plug. That is the way out!' },
+    ],
   };
 }
 

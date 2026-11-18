@@ -78,7 +78,7 @@ export class FreeBubble extends Entity {
     p.squash(1.25, 0.8);
     world.audio.sfx('bloop', { x: this.s.x });
     world.particles.sparkle(this.s.x, this.s.y, 5, '#ffffff');
-    if (!world._bubbleHinted) { world._bubbleHinted = true; world.say('MOVE to steer the bubble. JUMP to pop it for a boost!', 3.2); }
+    if (!world._bubbleHinted && world.def.id === '2-1') { world._bubbleHinted = true; world.say('MOVE to steer the bubble. JUMP to pop it for a boost!', 3.2); }
   }
 
   release(world) {
@@ -281,9 +281,9 @@ export class Shower extends Entity {
     const x0 = this.x, w = this.w, y0 = this.y, y1 = this.bottom;
     ctx.save();
     ctx.globalAlpha = 0.9 * this.flow;
-    ctx.fillStyle = grad(ctx, 0, y0, 0, y1, ['rgba(190,236,255,.28)', 'rgba(150,215,245,.22)']);
+    ctx.fillStyle = grad(ctx, 0, y0, 0, y1, ['rgba(110,195,238,.40)', 'rgba(90,180,232,.32)']);
     ctx.fillRect(x0, y0, w, y1 - y0);
-    ctx.fillStyle = 'rgba(255,255,255,.7)';
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
     const T = this.time * 190;
     for (let i = 0; i < 6; i++) {
       const lx = x0 + 1.5 + i * 2.4 + ((i * 7) % 3) * 0.3, len = 9 + ((i * 5) % 4) * 3, span = (y1 - y0) + len;
@@ -310,12 +310,13 @@ export class Wind extends Entity {
     const dirn = Math.sign(this.vx) || 1, spd = Math.abs(this.vx);
     ctx.save();
     ctx.beginPath(); ctx.rect(this.x, this.y, this.w, this.h); ctx.clip();
-    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1.3; ctx.lineCap = 'round';
+    ctx.fillStyle = 'rgba(190,160,235,.10)'; ctx.fillRect(this.x, this.y, this.w, this.h);
+    ctx.strokeStyle = 'rgba(140,105,205,.7)'; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
     for (let i = 0; i < this.zh * 2; i++) {
       const yy = this.y + 6 + i * (this.h / (this.zh * 2)) + Math.sin(i * 2.1) * 3;
       const off = ((this.time * spd * 1.6 * dirn + i * 41) % (this.w + 40) + (this.w + 40)) % (this.w + 40) - 20;
       const sx = dirn > 0 ? this.x + off : this.x + this.w - off;
-      ctx.globalAlpha = 0.5;
+      ctx.globalAlpha = 0.45 + 0.3 * Math.sin(this.time * 2 + i);
       ctx.beginPath(); ctx.moveTo(sx, yy); ctx.bezierCurveTo(sx + 8 * dirn, yy - 3, sx + 16 * dirn, yy + 3, sx + 24 * dirn, yy); ctx.stroke();
     }
     ctx.restore();

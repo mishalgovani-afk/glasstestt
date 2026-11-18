@@ -201,7 +201,7 @@ export function drawDecor(ctx, d, info) {
           ctx.fillRect(X + i * dw + dw / 2 - 2, Y + 16, 4, 16);
         }
         ctx.fillStyle = grad(ctx, 0, Y - 1, 0, Y + 9, ['#ffffff', '#ddd2ee']); roundRect(ctx, X - 3, Y - 2, W + 6, 9, 3); ctx.fill();
-        towels(ctx, X + 10, Y - 4, ['#ff9ec9', '#8fd8e8', '#ffe08a']);
+        if (!d.plain) towels(ctx, X + 10, Y - 4, ['#ff9ec9', '#8fd8e8', '#ffe08a']);
       }
       break;
     }
@@ -291,7 +291,7 @@ export function drawDecor(ctx, d, info) {
         }
         ctx.fillStyle = grad(ctx, 0, Y, 0, Y + H, ['#ffffff', '#e5edf3', '#b9c7d3']);
         roundRect(ctx, X, Y, W, H - 6, 18); ctx.fill();
-        ctx.fillStyle = '#6f8f9c'; roundRect(ctx, X + TILE - 2, Y + 3, W - 2 * TILE + 4, H - TILE - 4, 6); ctx.fill();
+        ctx.fillStyle = '#6f8f9c'; roundRect(ctx, X + TILE - 2, Y + 3, W - 2 * TILE + 4, (d.depth || d.h - 1) * TILE - 3, 6); ctx.fill();
       } else {
         ctx.fillStyle = grad(ctx, 0, Y - 3, 0, Y + 8, ['#ffffff', '#d5deea']);
         roundRect(ctx, X - 4, Y - 3, TILE + 8, 11, 5); ctx.fill();
@@ -315,7 +315,7 @@ export function drawDecor(ctx, d, info) {
     }
     case 'curtain': { // shower curtain hanging from a rail (behind the fish)
       if (!back) return;
-      ctx.fillStyle = chromeV && '#aeb9c3'; ctx.fillRect(X, Y, W, 4);
+      ctx.fillStyle = '#aeb9c3'; ctx.fillRect(X, Y, W, 4);
       const folds = Math.round(W / 14);
       for (let i = 0; i < folds; i++) {
         const fx = X + i * (W / folds), fw = W / folds;
@@ -385,8 +385,8 @@ export function drawDecor(ctx, d, info) {
     }
     case 'mat': { // bath mat on the floor (visual)
       if (!back) return;
-      ctx.fillStyle = grad(ctx, 0, Y, 0, Y + H, ['#ff9ec9', '#f07fb4']); roundRect(ctx, X, Y, W, H, 4); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]); roundRect(ctx, X + 3, Y + 2.5, W - 6, H - 5, 3); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = grad(ctx, 0, Y + H - 6, 0, Y + H, ['#ff9ec9', '#f07fb4']); roundRect(ctx, X, Y + H - 6, W, 6, 3); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(X + 4, Y + H - 3); ctx.lineTo(X + W - 4, Y + H - 3); ctx.stroke(); ctx.setLineDash([]);
       break;
     }
     case 'drain': { // big floor drain (finale of the chapter): decorative

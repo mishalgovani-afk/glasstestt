@@ -7,7 +7,7 @@ const SPR = 64; // sprite size in logical px (bubble radius 30)
 function paintBubble(c, w, h) {
   const cx = w / 2, cy = h / 2, r = 30;
   // very faint body, a little denser toward the rim
-  c.fillStyle = radial(c, cx, cy, r * 0.2, r, ['rgba(255,255,255,0.03)', 'rgba(210,240,255,0.10)', 'rgba(255,255,255,0.30)']);
+  c.fillStyle = radial(c, cx, cy, r * 0.2, r, ['rgba(150,190,255,0.08)', 'rgba(170,200,255,0.16)', 'rgba(190,170,255,0.38)']);
   c.beginPath(); c.arc(cx, cy, r, 0, 7); c.fill();
   // iridescent rim: segmented arcs with drifting hue
   const cols = ['#ff9ad5', '#ffd27a', '#aaffc9', '#7fe0ff', '#b9a4ff', '#ff9ad5'];
@@ -17,12 +17,14 @@ function paintBubble(c, w, h) {
     const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1.15) / seg) * Math.PI * 2;
     const k = ((i / seg) * (cols.length - 1)), j = Math.floor(k);
     c.strokeStyle = cols[j];
-    c.globalAlpha = 0.34 + 0.2 * Math.sin(a0 * 2 + 1);
+    c.globalAlpha = 0.62 + 0.25 * Math.sin(a0 * 2 + 1);
     c.beginPath(); c.arc(cx, cy, r - 1.6, a0, a1); c.stroke();
   }
   c.globalAlpha = 1;
-  c.strokeStyle = 'rgba(255,255,255,0.7)'; c.lineWidth = 1.2;
-  c.beginPath(); c.arc(cx, cy, r - 0.6, 0, 7); c.stroke();
+  c.strokeStyle = 'rgba(120,130,210,0.55)'; c.lineWidth = 1.4;
+  c.beginPath(); c.arc(cx, cy, r - 0.5, 0, 7); c.stroke();
+  c.strokeStyle = 'rgba(255,255,255,0.8)'; c.lineWidth = 1;
+  c.beginPath(); c.arc(cx, cy, r - 3.4, 0, 7); c.stroke();
   // highlights
   c.fillStyle = 'rgba(255,255,255,0.85)';
   c.beginPath(); c.ellipse(cx - r * 0.42, cy - r * 0.46, r * 0.26, r * 0.13, -0.7, 0, 7); c.fill();
