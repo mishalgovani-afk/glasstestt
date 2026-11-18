@@ -99,8 +99,10 @@ export class Waters {
 }
 
 /** Water colour for a tile `depth` tiles under the surface (0 = surface tile). */
+/** Depth shading saturates this many rows under a surface (tiles.js relies on it for dirty rows). */
+export const WATER_DEPTH_ROWS = 6;
 export function waterColor(pal, depth) {
-  return mix(pal.water, pal.waterDeep, Math.min(1, depth / 6));
+  return mix(pal.water, pal.waterDeep, Math.min(1, depth / WATER_DEPTH_ROWS));
 }
 
 let causticImg = null;

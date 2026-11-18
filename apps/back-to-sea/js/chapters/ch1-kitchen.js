@@ -91,16 +91,26 @@ function paintMid(c, w, h) {
     c.beginPath(); c.arc(x, 94 + r, r, 0, 7); c.fill();
     c.fillStyle = 'rgba(255,255,255,.18)'; c.beginPath(); c.arc(x - r * 0.35, 94 + r * 0.7, r * 0.35, 0, 7); c.fill();
   }
-  // tall fridge silhouette
-  c.fillStyle = grad(c, 520, 0, 640, 0, ['#e9edf0', '#fdfefe', '#d5dbe0']);
-  roundRect(c, 520, 30, 120, h, 10); c.fill();
-  c.fillStyle = 'rgba(0,0,0,.08)'; c.fillRect(520, 140, 120, 3);
-  c.fillStyle = '#b8c0c8'; roundRect(c, 528, 70, 5, 50, 2); c.fill(); roundRect(c, 528, 160, 5, 60, 2); c.fill();
-  // fridge magnets
-  for (const [x, y, col] of [[570, 80, '#ff8a3d'], [600, 100, '#6cc4a1'], [585, 190, '#f2c46b']]) {
-    c.fillStyle = col; c.beginPath(); c.arc(x, y, 5, 0, 7); c.fill();
+  // upper wall cabinets (they hang high on the wall, so they never read as a floor-standing prop
+  // next to the fridges, ovens or stoves that levels place as climbable decor)
+  const cx0 = 470, cy0 = 22, cw = 76, chh = 92;
+  for (let k = 0; k < 2; k++) {
+    const x = cx0 + k * (cw + 4);
+    c.fillStyle = 'rgba(80,50,25,.12)'; roundRect(c, x + 3, cy0 + 4, cw, chh, 6); c.fill();
+    c.fillStyle = grad(c, x, 0, x + cw, 0, ['#e9d3b0', '#f6e6c9', '#dcc29a']);
+    roundRect(c, x, cy0, cw, chh, 6); c.fill();
+    c.strokeStyle = 'rgba(140,100,60,.35)'; c.lineWidth = 2; roundRect(c, x + 7, cy0 + 7, cw - 14, chh - 14, 4); c.stroke();
+    c.fillStyle = '#b58a55'; roundRect(c, k ? x + 10 : x + cw - 14, cy0 + chh - 30, 4, 18, 2); c.fill();
   }
-  c.fillStyle = '#fff'; c.save(); c.translate(592, 120); c.rotate(-0.08); c.fillRect(-14, -10, 28, 34); c.restore();
+  c.fillStyle = '#c9a47a'; c.fillRect(cx0 - 6, cy0 + chh, cw * 2 + 16, 5);           // under-cabinet trim
+  // little spice shelf under them, high above any counter
+  c.fillStyle = '#c9a47a'; c.fillRect(cx0 + 20, cy0 + chh + 44, 110, 5);
+  for (let i = 0; i < 6; i++) {
+    const x = cx0 + 26 + i * 17, col = ['#d9534f', '#f2b941', '#58a46b', '#e98b7a', '#8e5bb8', '#3f8fd0'][i];
+    c.fillStyle = 'rgba(255,255,255,.75)'; roundRect(c, x, cy0 + chh + 24, 11, 20, 2); c.fill();
+    c.fillStyle = col; c.fillRect(x + 1.5, cy0 + chh + 30, 8, 12);
+    c.fillStyle = '#6b4a2e'; c.fillRect(x, cy0 + chh + 21, 11, 4);
+  }
 }
 
 function paintBacksplash(c, w, h) {

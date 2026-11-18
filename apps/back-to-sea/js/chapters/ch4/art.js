@@ -1,6 +1,7 @@
 // Chapter 4 art: dim basement (brick + concrete, copper pipes, boiler), all procedural.
 // Static layers are cached; the only per-frame cost is the half-resolution darkness mask.
 import { TILE } from '../../core/constants.js';
+import { Checkpoint } from '../../core/builtins.js';
 import {
   grad, radial, rgba, mix, lighten, darken, roundRect, glow, cached, ctxScale, seeded, blit, makeCanvas,
 } from '../../core/draw.js';
@@ -292,8 +293,8 @@ function lightsOf(world, cam, view) {
   for (const e of world.entities) {
     if (e.dead) continue;
     if (e.light) out.push({ ...e.light, k: 0.7 });
-    else if (e.locked !== undefined && e.tx !== undefined && e.constructor.name === 'Exit') out.push({ x: e.tx * TILE + 12, y: e.ty * TILE + 12, r: 100, k: 0.8, cold: true });
-    else if (e.active && e.constructor.name === 'Checkpoint') out.push({ x: e.tx * TILE + 12, y: e.ty * TILE + 12, r: 80, k: 0.7, warm: true });
+    else if (e === world.exit) out.push({ x: e.tx * TILE + 12, y: e.ty * TILE + 12, r: 100, k: 0.8, cold: true });
+    else if (e.active && e instanceof Checkpoint) out.push({ x: e.tx * TILE + 12, y: e.ty * TILE + 12, r: 80, k: 0.7, warm: true });
     else if (e.hazard && e.phase === 'jet') out.push({ x: e.cx, y: e.cy, r: 80, k: 0.7, warm: true });
   }
   // hot pipes glow (collected once per level)

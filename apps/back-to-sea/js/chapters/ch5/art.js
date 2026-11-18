@@ -101,7 +101,7 @@ function paintMid(c, w, h) {
 
 export function drawBackground(ctx, view, cam, time, world) {
   const s = ctxScale(ctx);
-  const L = lightning(time, world && world._ch5Flash || 0);
+  const L = lightning(time, (world && world.vars.flash) || 0);
   const far = cached('g5-far', 640, 360, s, paintFar);
   const fx = cam.x * 0.25, off = -((fx % 640) + 640) % 640;
   for (let x = Math.floor(off); x < view.w; x += 640) {
@@ -152,7 +152,7 @@ export function drawForeground(ctx, view, cam, time, world) {
     ctx.moveTo(x, y); ctx.lineTo(x - 3, y + 12);
   }
   ctx.stroke();
-  const L = lightning(time, world && world._ch5Flash || 0);
+  const L = lightning(time, (world && world.vars.flash) || 0);
   if (L > 0.02) { ctx.fillStyle = rgba('#dfe8ff', 0.16 * L); ctx.fillRect(0, 0, view.w, view.h); }
 }
 

@@ -13,7 +13,7 @@
 import { Entity } from '../../core/entity.js';
 import { TILE, DROPLET_MOISTURE } from '../../core/constants.js';
 import { grad, rgba, mix, lighten, darken, glow, roundRect } from '../../core/draw.js';
-import { Plumbing, Fill, doorRowBlocked } from './logic.js';
+import { Plumbing, Fill, doorRowBlocked, valveAcceptsPress } from './logic.js';
 
 const WATER = '#4fa3b8';
 const BRASS = '#d9a441';
@@ -21,13 +21,13 @@ const COPPER = '#b8683a';
 
 /** One Plumbing per world; checkpoints snapshot it and respawns restore it. */
 export function getPlumb(world) {
-  if (!world._plumb) {
+  if (!world.vars.plumb) {
     const p = new Plumbing();
-    world._plumb = p;
+    world.vars.plumb = p;
     world.on('checkpoint', () => p.snapshot());
     world.on('respawn', () => p.restore());
   }
-  return world._plumb;
+  return world.vars.plumb;
 }
 function tickPlumb(world, dt) {
   const p = getPlumb(world);
@@ -35,7 +35,7 @@ function tickPlumb(world, dt) {
   return [];
 }
 const inView = (world, x, y, pad = 80) => {
-  const c = world.camera, v = world.game.view;
+  const c = world.camera, v = world.view;
   return x > c.x - pad && x < c.x + v.w + pad && y > c.y - pad && y < c.y + v.h + pad;
 };
 
@@ -68,6 +68,29 @@ function drawPipe(ctx, pts, flow, time) {
   ctx.restore();
 }
 
+/** Small speech-bubble prompt: the on-screen JUMP button's arrow glyph + "JUMP" ("let go" if moving). */
+export function drawJumpPrompt(ctx, cx, by, a, moving) {
+  if (a <= 0.01) return;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, a);
+  const label = moving ? 'STOP + JUMP' : 'JUMP';
+  ctx.font = '800 8px ui-rounded, system-ui, sans-serif';
+  const tw = ctx.measureText(label).width, w = tw + 22, h = 15, x = cx - w / 2, y = by - h;
+  ctx.fillStyle = 'rgba(8,24,36,.82)'; roundRect(ctx, x, y, w, h, 7.5); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx - 4, y + h); ctx.lineTo(cx + 4, y + h); ctx.lineTo(cx, y + h + 4); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1; roundRect(ctx, x, y, w, h, 7.5); ctx.stroke();
+  // the arrow glyph from the touch JUMP button (index.html: M12 19V6 M6 11l6-6 6 6, 24-unit box)
+  const gx = x + 9, gy = y + h / 2, k = 0.42;
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(gx, gy + 7 * k); ctx.lineTo(gx, gy - 6 * k);
+  ctx.moveTo(gx - 6 * k, gy - 1 * k); ctx.lineTo(gx, gy - 7 * k); ctx.lineTo(gx + 6 * k, gy - 1 * k);
+  ctx.stroke();
+  ctx.fillStyle = moving ? '#ffd27a' : '#fff'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText(label, gx + 6, gy + 0.5);
+  ctx.restore();
+}
+
 // ------------------------------------------------------------------------------------------- Valve
 export class Valve extends Entity {
   jumpPriority = 20;
@@ -83,11 +106,12 @@ export class Valve extends Entity {
   get on() { return this.plumb.isOn(this.ids[0]); }
   onJump(player, world) {
     if (this.cool > 0) return false;           // never eat stroke presses while cooling down
-    // Holding ANY direction means "hop/swim on": otherwise waiting at the wheel and then hopping
-    // away would turn it straight back. Stand still and JUMP to turn it.
-    const inp = world.game && world.game.input;
-    const dir = inp && inp.dir ? inp.dir() : 0;
-    if (dir !== 0) return false;
+    // Holding ANY direction means "hop/swim on" (see valveAcceptsPress). The on-wheel prompt says
+    // so, and a press with a direction held at a wheel you have never turned nudges you once.
+    if (!valveAcceptsPress(world.input.dir())) {
+      if (!this.used && !this.nudged) { this.nudged = true; world.say('Let go of MOVE, then JUMP to turn the wheel', 3); }
+      return false;
+    }
     this.cool = 0.5; this.used = true; this.shake = 1;
     const next = !this.on;
     for (const id of this.ids) this.plumb.set(id, next, next ? this.dur : 0);
@@ -112,6 +136,10 @@ export class Valve extends Entity {
     const d = target - this.ang;
     this.ang += Math.sign(d) * Math.min(Math.abs(d), dt * 14 * (on ? 1 : 0.6));
     this.near = world.player && Math.abs(world.player.cx - this.cx) < 64 && Math.abs(world.player.cy - this.cy) < 56;
+    // touching the wheel (the box onJump answers for): show the JUMP prompt on it
+    const p = world.player;
+    this.touch = !!(p && p.alive && this.overlaps(p.body));
+    this.prompt = Math.max(0, Math.min(1, (this.prompt || 0) + (this.touch ? dt * 6 : -dt * 4)));
   }
   draw(ctx, world) {
     const x = this.x - 3, y = this.y, cx = this.cx, wy = y + 9;
@@ -142,12 +170,14 @@ export class Valve extends Entity {
     }
     // status lamp
     ctx.fillStyle = on ? '#7dffb0' : '#ff6a4a'; ctx.beginPath(); ctx.arc(cx + 9, y + 19, 1.8, 0, 7); ctx.fill();
-    // hint chevron
-    if (this.near && !this.used) {
+    // hint chevron (nearby, never turned yet)
+    if (this.near && !this.used && this.prompt < 0.5) {
       const ay = y - 8 + Math.sin(this.time * 5) * 2;
       ctx.fillStyle = 'rgba(255,255,255,.92)';
       ctx.beginPath(); ctx.moveTo(cx - 5, ay - 6); ctx.lineTo(cx + 5, ay - 6); ctx.lineTo(cx, ay); ctx.closePath(); ctx.fill();
     }
+    // on-wheel prompt while touching it: the JUMP button's glyph + label, dimmed during cooldown
+    if (this.prompt > 0) drawJumpPrompt(ctx, cx, y - 14 + Math.sin(this.time * 4) * 1.5, this.prompt * (this.cool > 0 ? 0.45 : 1), world.input.dir() !== 0);
   }
 }
 

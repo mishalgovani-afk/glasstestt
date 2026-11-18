@@ -17,7 +17,7 @@ import { levels } from './ch4/levels.js';
 export default {
   id: 'basement', number: 4,
   title: 'The Basement', subtitle: 'Down in the pipes',
-  mechanic: { name: 'Valves & rising water', hint: 'JUMP at a valve wheel to turn it and move the water.' },
+  mechanic: { name: 'Valves & rising water', hint: 'Stop at a valve wheel and JUMP to turn it: the water rises or falls.' },
   palette: P,
   drawBackground, drawSolidTile, drawOneWayTile, drawHazard, drawDecor, drawForeground,
   entities: { V: Valve, T: Tank, G: Gate, D: DripPipe, Y: Vent },

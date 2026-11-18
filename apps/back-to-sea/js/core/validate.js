@@ -301,9 +301,10 @@ export function searchReach(env, reach = {}) {
       const key = `${to}|${r.picks.map((p) => p.id).join(',')}`;
       // keep the fastest trajectory per (target, droplet set)
       const prev = seen.has(key) ? out.find((e) => e.key === key) : null;
-      if (prev) { if (r.time < prev.time) { prev.time = r.time; prev.picks = r.picks; } continue; }
+      const how = { mode, start, strat: s };
+      if (prev) { if (r.time < prev.time) { prev.time = r.time; prev.picks = r.picks; prev.how = how; } continue; }
       seen.add(key);
-      out.push({ key, to, time: r.time, picks: r.picks, refillBefore: false });
+      out.push({ key, to, time: r.time, picks: r.picks, refillBefore: false, how });
     }
   };
 
@@ -322,7 +323,7 @@ export function searchReach(env, reach = {}) {
           const nx = x + dx, ny = y + dy;
           if (!env.waterAt(nx, ny)) continue;
           const to = nodeOfCell(nx, ny);
-          if (to !== null) out.push({ to, time: 0, picks: [], refillBefore: false });
+          if (to !== null) out.push({ to, time: 0, picks: [], refillBefore: false, how: { mode: 'swim', dx, dy } });
         }
         const jobs = [];
         if (isSurface(env, x, y)) {
@@ -350,7 +351,7 @@ export function searchReach(env, reach = {}) {
           if (to !== null && !env.water[y * w + nx] && (to === EXIT || to >= N || isStand(env, nx, y))) {
             const time = (TILE / K.WRIGGLE_SPEED) * K.WALK_TIME_FACTOR;
             const di = env.droplet[y * w + nx];
-            out.push({ to, time, picks: di >= 0 ? [{ id: di, t: time }] : [], refillBefore: false });
+            out.push({ to, time, picks: di >= 0 ? [{ id: di, t: time }] : [], refillBefore: false, how: { mode: 'walk', dir } });
           } else if (!env.solidAt(nx, y)) {
             for (const s of WALK_OFF_STRATEGIES(dir)) jobs.push({ start: { cx, cy, vx: 0, vy: 0, onGround: true }, strat: s, mode: 'walk' });
           }
@@ -397,14 +398,14 @@ export function searchReach(env, reach = {}) {
     if (ed.to) {
       const to = nodeOfCell(ed.to.x, ed.to.y);
       if (to === null) { ruleErrors.push(`reach: edge to ${ed.to.x},${ed.to.y} is not a stand/water/trigger cell`); return; }
-      out.push({ to, time: ed.time || 0, picks: [], refillBefore });
+      out.push({ to, time: ed.time || 0, picks: [], refillBefore, how: { mode: 'rule', ed } });
     } else if (ed.launch) {
       const L = ed.launch;
       const strats = ed.steer === false ? [STRATEGIES[0]] : STRATEGIES;
       const tmp = [];
       const start = { cx: L.cx, cy: L.cy, vx: L.vx || 0, vy: L.vy || 0, leapT: L.leapT || 0, ignoreTrigger: from >= N ? from - N : -1 };
       addSims(tmp, from, strats.map((s) => ({ start, strat: s, mode: 'jump' })));
-      for (const t of tmp) { t.refillBefore = refillBefore; t.time += ed.time || 0; out.push(t); }
+      for (const t of tmp) { t.refillBefore = refillBefore; t.time += ed.time || 0; t.how = { ...t.how, rule: ed }; out.push(t); }
     }
   }
   function ruleEdges(tIdx, out) {
@@ -428,18 +429,26 @@ export function searchReach(env, reach = {}) {
   const queue = [];
   let explored = 0, bestX = S.tx;
   const parent = new Map();
+  const parentHow = new Map(); // node -> how the search first got there (for stats.steps)
   const describe = (n) => (n >= N ? `${env.triggers[n - N].ch}@${env.triggers[n - N].tx},${env.triggers[n - N].ty}` : `${env.water[n] ? '~' : ''}${n % w},${(n / w) | 0}`);
+  // the route as moves: [{ to: 'x,y' | '~x,y' | 'B@x,y' | 'E', how: { mode, start?, strat?, dir?, ed? } }]
+  const stepsTo = (n, lastHow) => {
+    const out = [{ to: 'E', how: lastHow }]; let k = n, guard = 0;
+    while (k !== null && k !== undefined && guard++ < 999) { out.push({ to: describe(k), how: parentHow.get(k) || null }); k = parent.get(k); }
+    return out.reverse();
+  };
   const pathTo = (n) => { const out = []; let k = n, guard = 0; while (k !== null && k !== undefined && guard++ < 999) { out.push(describe(k)); k = parent.get(k); } return out.reverse(); };
   let goalFrom = null;
-  const tryAdd = (node, mask, d, from) => {
-    if (node === EXIT) { goalFrom = from; return true; }
+  let goalHow = null;
+  const tryAdd = (node, mask, d, from, how = null) => {
+    if (node === EXIT) { goalFrom = from; goalHow = how; return true; }
     if (isRefillNode(node)) d = 0;
     const list = labels.get(node) || [];
     for (const L of list) if ((L.mask & mask) === L.mask && L.d <= d + 1e-9) return false;
     const kept = list.filter((L) => !((mask & L.mask) === mask && d <= L.d + 1e-9));
     kept.push({ mask, d });
     labels.set(node, kept);
-    if (!parent.has(node)) parent.set(node, from);
+    if (!parent.has(node)) { parent.set(node, from); parentHow.set(node, how); }
     queue.push({ node, mask, d });
     return false;
   };
@@ -469,8 +478,8 @@ export function searchReach(env, reach = {}) {
     for (const e of edgesOf(cur.node)) {
       const r = travel(cur.d, cur.mask, e);
       if (!r) continue;
-      if (tryAdd(e.to, r.mask, r.d, cur.node)) {
-        return { ok: true, stats: { explored, nodes: labels.size, path: [...pathTo(goalFrom), 'E'] }, ruleErrors };
+      if (tryAdd(e.to, r.mask, r.d, cur.node, e.how || null)) {
+        return { ok: true, stats: { explored, nodes: labels.size, path: [...pathTo(goalFrom), 'E'], steps: stepsTo(goalFrom, goalHow) }, ruleErrors };
       }
     }
   }

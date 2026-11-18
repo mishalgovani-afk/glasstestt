@@ -4,7 +4,7 @@ import { Entity } from '../../core/entity.js';
 import { TILE, DROPLET_MOISTURE } from '../../core/constants.js';
 import { nearSurface } from '../../core/physics.js';
 import { rgba, grad } from '../../core/draw.js';
-import { dirVec, dashLaunch, DASH_COOLDOWN, DRIFT_SPEED, drumState, inDrum } from './flow.js';
+import { dirVec, dashLaunch, DASH_COOLDOWN, DRIFT_SPEED, drumState, drumDashDir, inDrum, DRUM_PULL } from './flow.js';
 
 const solidPx = (w, px, py) => w.solidAtPx(px, py);
 /** Move the player body by (dx, dy) unless that would enter a solid tile (per axis). */
@@ -19,8 +19,8 @@ export function driftBody(world, b, dx, dy) {
 /** After a dash, landing on dry ground skids to a stop (dash momentum would otherwise carry ~10 tiles). */
 export const SKID_SPEED = 200;
 function installSkid(world) {
-  if (world._skid) return;
-  world._skid = true;
+  if (world.vars.skid) return;
+  world.vars.skid = true;
   world.on('land', () => {
     const p = world.player;
     if (p.lastDashT === undefined || world.time - p.lastDashT > 2.5) return;
@@ -152,13 +152,16 @@ export class Drum extends Entity {
     if (!p.inWater || !this.has(p, world) || p.dashUntil > world.time) return;
     const [vx, vy] = dirVec(this.state(world).dir);
     const dt = 1 / 120;
-    // the churning water also holds you up (cancels the idle sink), so you ride the spin round
-    driftBody(world, p.body, vx * 70 * dt, (vy * 70 - 40) * dt);
+    // the churning water also holds you up (cancels the idle sink), so you ride the spin round,
+    // and it eddies you back toward the middle (DRUM_PULL) instead of pinning you to the wall:
+    // you circle ~2 tiles out, so when the arrow points at the porthole a dash clears it
+    const ox = this.props.cx * TILE - p.cx, oy = this.props.cy * TILE - p.cy;
+    driftBody(world, p.body, (vx * 70 + ox * DRUM_PULL) * dt, (vy * 70 - 40 + oy * DRUM_PULL) * dt);
   }
   onJump(p, world) {
     if (!p.inWater || !this.has(p, world) || nearSurface(p.body, world)) return false;
     if (this.cool > 0) return true;
-    doDash(this, p, world, this.state(world).dir);
+    doDash(this, p, world, drumDashDir(world.time, this.props));
     return true;
   }
   draw(ctx, world) {

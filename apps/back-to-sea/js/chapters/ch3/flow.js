@@ -39,6 +39,19 @@ export function drumState(t, props = {}) {
   return { index: i, dir: DRUM_ORDER[i], phase: (Math.max(0, t) % step) / step, ticks };
 }
 
+/**
+ * Reaction-time grace: a JUMP up to DRUM_GRACE s after the drum ticks round still dashes the way
+ * the arrow pointed a moment ago (what the player was looking at when they decided to press).
+ */
+export const DRUM_GRACE = 0.22;
+/** The drum's eddy pulls you toward its centre at this many px/s per px off-centre. */
+export const DRUM_PULL = 1.6;
+export function drumDashDir(t, props = {}) {
+  const s = drumState(t, props), step = props.step || DRUM_STEP;
+  if (s.ticks > (props.start || 0) && s.phase * step < DRUM_GRACE) return drumState(t - s.phase * step - 1e-6, props).dir;
+  return s.dir;
+}
+
 /** Is the world point (px, py) inside the drum's round interior? props: { cx, cy (tiles, centre), r (tiles) } */
 export function inDrum(props, px, py) {
   const dx = px - props.cx * TILE, dy = py - props.cy * TILE;

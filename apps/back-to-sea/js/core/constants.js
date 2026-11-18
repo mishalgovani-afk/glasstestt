@@ -75,6 +75,7 @@ export const CAM_LOOK_AHEAD = 56;
 export const CAM_FOLLOW_X = 5;
 export const CAM_FOLLOW_Y = 4;
 export const SHAKE_MAX = 10;        // px at full trauma
+export const LEVEL_BANNER_T = 2.6;  // s the level-name banner shows at level start (hints wait for it)
 
 // Particles
 export const MAX_PARTICLES = 420;

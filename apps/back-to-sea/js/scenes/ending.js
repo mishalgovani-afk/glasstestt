@@ -1,10 +1,12 @@
-// Ending: the fish reaches the open sea, credits roll, total play time.
-// The finale chapter may customise it with `ending: { draw(ctx, view, t, stats), credits: [...] }`.
+// Ending: the fish reaches the open sea, credits roll, total play time, Play again / Levels / Title.
+// The finale chapter may customise it with
+//   ending: { draw(ctx, view, t, stats), credits: [...] | (stats) => [...], cardAt?, skipTo?, music? }
+// stats = { total, cleared, best: {id: s}, levels: LEVELS }. See DESIGN.md "Boss & finale hooks".
 
 import { el, mount, unmount, esc, makePuppetFish } from './ui.js';
 import { grad, glow, rgba } from '../core/draw.js';
 import { fmtLong } from './hud.js';
-import { CHAPTERS } from '../chapters/index.js';
+import { CHAPTERS, LEVELS } from '../chapters/index.js';
 
 export class EndingScene {
   constructor(game) { this.game = game; this.t = 0; this.fish = makePuppetFish(); }
@@ -14,39 +16,60 @@ export class EndingScene {
     g.input.enabled = false;
     const fin = CHAPTERS[CHAPTERS.length - 1];
     this.custom = fin.ending || null;
-    g.audio.setMusic({ bpm: 70, key: 'D', scale: 'lydian', progression: [1, 4, 6, 5], reverb: 0.6,
+    const opt = this.custom || {};
+    this.cardAt = opt.cardAt || 0;          // seconds before the card fades in (tap skips ahead)
+    this.skipTo = opt.skipTo || this.cardAt; // a tap before this jumps the scene clock to it
+    g.audio.setMusic(opt.music || { bpm: 70, key: 'D', scale: 'lydian', progression: [1, 4, 6, 5], reverb: 0.6,
       pad: { wave: 'sine', vol: 0.55, octave: 3, cutoff: 2000, attack: 2 }, arp: { wave: 'sine', vol: 0.25, octave: 5, pattern: [0, 1, 2, 3, 2, 1], rate: 2, decay: 0.6 },
       lead: { wave: 'triangle', vol: 0.2, octave: 5, density: 0.3, decay: 1.2 } });
     const s = g.save.data;
-    this.stats = { total: s.total || 0, cleared: Object.keys(s.cleared || {}).length };
+    this.stats = { total: s.total || 0, cleared: Object.keys(s.cleared || {}).length, best: { ...(s.best || {}) }, levels: LEVELS };
+    let extra = [];
+    try { extra = typeof opt.credits === 'function' ? opt.credits(this.stats) : (opt.credits || []); } catch (e) { console.error(e); }
     const credits = [
       ['Back to Sea', ''],
       ['A game about getting home', ''],
       ['Design & code', 'Made with HTML5 canvas'],
       ['Art', 'Drawn procedurally, every frame'],
       ['Music & sound', 'Synthesized live with WebAudio'],
-      ...((this.custom && this.custom.credits) || []).map((c) => (Array.isArray(c) ? c : [c, ''])),
+      ...extra.map((c) => (Array.isArray(c) ? c : [c, ''])),
       ['Thank you for playing', ''],
     ];
     const node = el(`
-      <div class="screen ending">
+      <div class="screen ending${this.cardAt > 0 ? ' later' : ''}">
         <div class="end-card">
           <div class="eyebrow">The End</div>
           <h2>Back to Sea</h2>
           <p class="time">Total play time <b>${esc(fmtLong(this.stats.total))}</b></p>
           <div class="credits"><div class="roll">${credits.map(([a, b]) => `<p><b>${esc(a)}</b>${b ? `<span>${esc(b)}</span>` : ''}</p>`).join('')}</div></div>
-          <div class="menu row"><button class="btn primary" data-a="title">Title</button><button class="btn" data-a="levels">Levels</button></div>
+          <div class="menu row end-menu">
+            <button class="btn primary" data-a="again">Play again</button>
+            <button class="btn" data-a="levels">Levels</button>
+            <button class="btn" data-a="title">Title</button>
+          </div>
         </div>
       </div>`);
     node.addEventListener('click', (e) => {
-      const b = e.target.closest('button'); if (!b) return;
+      const b = e.target.closest('button'); if (!b || !this.cardShown) return;
       g.audio.sfx('ui');
-      if (b.dataset.a === 'title') g.toTitle(); else g.toLevels();
+      const a = b.dataset.a;
+      if (a === 'again') g.startLevel(0, { card: true });
+      else if (a === 'title') g.toTitle();
+      else g.toLevels();
     });
+    // a tap during the intro skips ahead to the card
+    node.addEventListener('pointerdown', (e) => { if (!this.cardShown && !e.target.closest('button') && this.t < this.skipTo) this.t = this.skipTo; });
     this.node = mount(node);
+    this.cardShown = false;
+    this._showCard(this.cardAt <= 0);
+  }
+  _showCard(now) {
+    if (this.cardShown || !now) return;
+    this.cardShown = true;
+    this.node.classList.add('show');
   }
   exit() { unmount(this.node); }
-  update(dt) { this.t += dt; this.fish.update(dt, 90, Math.cos(this.t * 1.4) * 60); }
+  update(dt) { this.t += dt; this.fish.update(dt, 90, Math.cos(this.t * 1.4) * 60); this._showCard(this.t >= this.cardAt); }
   render(ctx, view) {
     if (this.custom && this.custom.draw) {
       try { this.custom.draw(ctx, view, this.t, this.stats); return; } catch (e) { console.error(e); }

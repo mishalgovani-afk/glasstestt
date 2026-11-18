@@ -169,6 +169,12 @@ body.touch .title .foot { display: none; }
 .credits .roll { animation: credits 18s linear infinite; }
 .credits p { margin: 0 0 10px; display: grid; font: 700 14px var(--font); }
 .credits p span { font-weight: 500; color: var(--muted); font-size: 12px; }
+.end-card { transition: opacity .9s ease, transform .9s ease; }
+.screen.ending.later .end-card { opacity: 0; transform: translateY(14px); pointer-events: none; }
+.screen.ending.later.show .end-card { opacity: 1; transform: none; pointer-events: auto; }
+/* three buttons share one row: drop the 190px menu minimum so they fit a phone-width card */
+.menu.row { gap: 8px; flex-wrap: wrap; }
+.menu.row .btn { min-width: 0; flex: 1 1 0; padding: 12px 10px; font-size: 15px; white-space: nowrap; }
 @keyframes credits { from { transform: translateY(40px); } to { transform: translateY(-100%); } }
 
 /* ---------------------------------------------------------------- overlays */

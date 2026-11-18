@@ -3,20 +3,20 @@
 // `ending: { draw, credits }` (see DESIGN.md). Screen space; everything procedural.
 //
 // Timeline (seconds): 0-2.4 drop down the shaft · 2.4-6.4 ride the drain · 6.4-7.2 burst out
-// into the light · then the sunset sea, looping, with the fish leaping for joy. The DOM credits
-// card stays hidden until the sea appears (tap to skip ahead) and gains a "Play again" button.
+// into the light · then the sunset sea, looping, with the fish leaping for joy. The core ending
+// scene shows its credits card (with Play again) at cardAt; a tap before that skips to skipTo.
 
 import { grad, radial, rgba, mix, glow, roundRect, seeded } from '../../core/draw.js';
-import { save } from '../../core/save.js';
 import { fmtTime } from '../../scenes/hud.js';
 import { makePuppetFish } from '../../scenes/ui.js';
 
 const T_RIDE = 2.4, T_BURST = 6.4, T_SEA = 7.2, T_CARD = 7.8;
-const st = { fish: null, lastT: -1, skip: 0, node: null, others: null };
+const st = { fish: null, lastT: -1, others: null };
 
-export function buildCredits() {
-  const best = (save.data && save.data.best) || {};
-  const levels = (globalThis.__bts && globalThis.__bts.LEVELS) || [];
+/** Extra credits lines: best times per chapter. stats = { best: {id: s}, levels: [{ chapter, level }] }. */
+export function buildCredits(stats = {}) {
+  const best = stats.best || {};
+  const levels = stats.levels || [];
   const out = [['Starring', 'One very determined goldfish'], ['With', 'Smudge the Garage Cat'], ['Best times', '']];
   const chapters = [];
   for (const e of levels) {
@@ -32,45 +32,11 @@ export function buildCredits() {
   return out;
 }
 
-function dom(t) {
-  if (typeof document === 'undefined') return;
-  const node = document.querySelector('.screen.ending');
-  if (!node) return;
-  if (node !== st.node) {
-    st.node = node;
-    const card = node.querySelector('.end-card');
-    if (card) {
-      card.style.transition = 'opacity .9s ease, transform .9s ease';
-      card.style.opacity = '0'; card.style.transform = 'translateY(14px)'; card.style.pointerEvents = 'none';
-      const menu = card.querySelector('.menu');
-      if (menu && !menu.querySelector('[data-ch5="again"]')) {
-        const b = document.createElement('button');
-        b.className = 'btn primary'; b.textContent = 'Play again'; b.dataset.ch5 = 'again';
-        b.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const g = globalThis.__bts && globalThis.__bts.game;
-          if (g) { g.audio.sfx('ui'); g.startLevel(0, { card: true }); } else location.href = location.pathname;
-        });
-        for (const o of menu.querySelectorAll('.btn.primary')) o.classList.remove('primary');
-        menu.prepend(b);
-        // three buttons must fit the card: let them share the row
-        menu.style.gap = '8px';
-        for (const o of menu.querySelectorAll('.btn')) Object.assign(o.style, { minWidth: '0', flex: '1 1 0', padding: '12px 8px', fontSize: '15px' });
-      }
-    }
-    node.addEventListener('pointerdown', () => { if (st.lastT + st.skip < T_SEA) st.skip = T_SEA - st.lastT; });
-  }
-  const card = node.querySelector('.end-card');
-  if (card && t >= T_CARD && card.style.opacity === '0') { card.style.opacity = '1'; card.style.transform = 'none'; card.style.pointerEvents = ''; }
-}
-
-export function drawEnding(ctx, view, t0, stats) {
-  if (t0 < st.lastT) { st.skip = 0; st.node = null; }
-  const dt = Math.max(0, Math.min(0.1, t0 - st.lastT));
-  st.lastT = t0;
-  const t = t0 + st.skip;
+export function drawEnding(ctx, view, t, stats) {
+  if (t < st.lastT) st.lastT = t;            // a new ending scene (or a replay)
+  const dt = Math.max(0, Math.min(0.1, t - st.lastT));
+  st.lastT = t;
   if (!st.fish) st.fish = makePuppetFish();
-  dom(t);
   const W = view.w, H = view.h;
   if (t < T_RIDE) drawDrop(ctx, W, H, t, dt);
   else if (t < T_BURST) drawRide(ctx, W, H, t - T_RIDE, dt);
@@ -309,7 +275,10 @@ function sparkle(ctx, x, y) {
   ctx.fillRect(x - 0.75, y - 4, 1.5, 8); ctx.fillRect(x - 4, y - 0.75, 8, 1.5);
 }
 
+// The core ending scene keeps the card hidden until the sea (cardAt) and lets a tap skip ahead.
 export const ending = {
   draw: drawEnding,
-  get credits() { return buildCredits(); },
+  credits: buildCredits,
+  cardAt: T_CARD,
+  skipTo: T_SEA,
 };

@@ -28,7 +28,7 @@ input.attach(document.getElementById('touch'), {
 });
 
 const game = {
-  view, audio, input, save,
+  view, audio, input, save, params, levels: LEVELS,
   debug: params.has('debug') && params.get('debug') !== '0',
   reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
   blocked: false,
@@ -156,16 +156,30 @@ function frame(now) {
   if (dt < 0) dt = 0;
   const sc = game.scene;
   if (sc) {
-    acc += dt;
-    let n = 0;
-    while (acc >= STEP && n < 20) { sc.update(STEP); acc -= STEP; n++; }
-    if (n >= 20) acc = 0;
+    const t0 = performance.now();
+    if (perf.hold) acc = 0;
+    else {
+      acc += dt;
+      let n = 0;
+      while (acc >= STEP && n < 20) { sc.update(STEP); acc -= STEP; n++; }
+      if (n >= 20) acc = 0;
+    }
+    const t1 = performance.now();
     ctx.setTransform(view.backingScale, 0, 0, view.backingScale, 0, 0);
     ctx.imageSmoothingEnabled = true;
     try { sc.render(ctx, view, acc / STEP, dt); } catch (e) { if (!frame.err) { frame.err = true; console.error(e); } }
+    perf.record(t1 - t0, performance.now() - t1);
   }
   audio.tick();
 }
+
+// Frame-cost probe for automated checks (cheap: two numbers per frame into a ring buffer).
+const perf = {
+  hold: false, n: 0, upd: new Float32Array(1024), ren: new Float32Array(1024),
+  record(u, r) { const i = this.n++ & 1023; this.upd[i] = u; this.ren[i] = r; },
+  reset() { this.n = 0; },
+  samples() { const k = Math.min(this.n, 1024), out = []; for (let i = 0; i < k; i++) out.push([this.upd[i], this.ren[i]]); return out; },
+};
 
 // --------------------------------------------------------------------------- start + debug
 const lvParam = params.get('level');
@@ -176,7 +190,10 @@ requestAnimationFrame((t) => { last = t; frame(t); });
 
 // Test/debug hook (read-only state + virtual input), used by automated checks.
 window.__bts = {
-  game, input, LEVELS,
+  game, input, LEVELS, perf,
+  /** hold(true) stops the real-time loop from stepping the scene; step(n) then advances it n fixed steps. */
+  hold(on = true) { perf.hold = !!on; },
+  step(n = 1) { for (let i = 0; i < n; i++) if (game.scene) game.scene.update(STEP); },
   get world() { return game.scene && game.scene.world; },
   state() {
     const w = this.world; if (!w) return { scene: game.scene && game.scene.constructor.name };

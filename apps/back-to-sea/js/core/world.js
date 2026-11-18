@@ -2,7 +2,7 @@
 // hints, faint/respawn and level completion. Entities talk to the game only through this
 // object (see DESIGN.md "World services").
 
-import { TILE, STEP, MOISTURE_MAX } from './constants.js';
+import { TILE, STEP, MOISTURE_MAX, LEVEL_BANNER_T } from './constants.js';
 import { parseLevel, TILE_CHARS } from './level.js';
 import { Particles } from './particles.js';
 import { Camera } from './camera.js';
@@ -42,7 +42,19 @@ export class World {
     this.fade = 0;
     this.fainting = null; this.winning = null;
     this.dryScale = 1;
+    this.timeScale = 1; this._slowT = 0;
+    /** Per-level scratch space for chapter code (cleared with the World). See DESIGN.md "Chapter hooks". */
+    this.vars = Object.create(null);
+    /** Read-only view of the player's MOVE/JUMP input, for entities that react to held keys. */
+    const gi = () => game.input;
+    this.input = Object.freeze({
+      dir: () => { const i = gi(); return i && !this.fainting && !this.winning ? i.dir() : 0; },
+      jumpHeld: () => { const i = gi(); return !!(i && !this.fainting && !this.winning && i.jumpHeld()); },
+    });
+    /** URL query parameters (?level=, ?phase=...), as a URLSearchParams-like { get(name) }. */
+    this.params = game.params || { get: () => null, has: () => false };
     this._wavesDirty = false;
+    this._hintQueue = [];
     this.says = (this.def.says || []).map((s) => ({ ...s, done: false }));
 
     this.particles = new Particles();
@@ -75,7 +87,8 @@ export class World {
     this.tiles = new TileLayers(this, game.view.backingScale);
     this._buildWaterPath();
     this.camera.snap(this.player, game.view, this.level);
-    if (this.def.hint) this.say(this.def.hint, 5.5, 0.8);
+    // the level hint and `says` lines queue behind the level-name banner and each other
+    if (this.def.hint) this._hintQueue.push({ text: this.def.hint, seconds: 5.5 });
   }
 
   _add(e) {
@@ -94,9 +107,10 @@ export class World {
   /** Change a tile at runtime (re-renders that chunk and the water surfaces). */
   setTile(tx, ty, c) {
     if (tx < 0 || ty < 0 || tx >= this.w || ty >= this.h || !TILE_CHARS.has(c)) return;
-    if (this.level.tile[ty][tx] === c) return;
+    const was = this.level.tile[ty][tx];
+    if (was === c) return;
     this.level.tile[ty][tx] = c;
-    this.tiles.markDirty(tx);
+    this.tiles.markDirty(tx, ty, was, c);
     this._wavesDirty = true;
   }
   isSolid(tx, ty) { return this.tileAt(tx, ty) === '#'; }
@@ -124,6 +138,14 @@ export class World {
   shake(amount = 0.3) { this.camera.shake(amount); }
   /** On-screen hint. Replaces the current one. */
   say(text, seconds = 3, delay = 0) { this.hint = { text, t: -delay, dur: seconds }; }
+  /** True while the level-name banner is on screen (hints are held until it is gone). */
+  get bannerOn() { return this.levelTime < LEVEL_BANNER_T && !this.boss; }
+  /** Switch the music (chapter schema, see DESIGN.md "Music schema"); null = silence. */
+  setMusic(schema) { if (this.game.audio) this.game.audio.setMusic(schema); }
+  /** The logical view { w, h, scale, safe } (screen size in world px). */
+  get view() { return this.game.view; }
+  /** Slow motion: scale simulated time by `scale` for `seconds` of real time (0 = until changed). */
+  slowMo(scale = 0.4, seconds = 0) { this.timeScale = Math.max(0, scale); this._slowT = seconds > 0 ? seconds : 0; }
   flash(color = '#ffffff', seconds = 0.25) { this.flashC = color; this.flashT = seconds; this.flashD = seconds; }
   splash(x, y, power = 1, up = false) {
     this.particles.splash(x, y, power, this.palette.water);
@@ -146,6 +168,7 @@ export class World {
     this.faints++;
     const p = this.player;
     p.state = 'faint'; p.anim.faintT = 0;
+    this.timeScale = 1; this._slowT = 0;
     this.audio.sfx(reason === 'hazard' ? 'burn' : 'faint', { x: p.cx });
     if (reason === 'hazard') this.particles.steam(p.cx, p.cy, 6);
     this.shake(0.35);
@@ -180,14 +203,18 @@ export class World {
     p.place(sp.cx, sp.bottom);
     p.moisture = MOISTURE_MAX;
     p.state = 'air'; p.anim.faintT = 0; p.anim.rot = 0; p.buffer = 0;
+    this.timeScale = 1; this._slowT = 0;
     for (const e of this.entities) { try { e.onRespawn(this); } catch (err) { console.error(err); } }
     this.camera.snap(p, this.game.view, this.level);
     this.emit('respawn', this.checkpoint);
   }
 
-  step(dt, input) {
+  step(realDt, input) {
+    // levelTime (HUD timer, best times) is wall-clock; everything simulated follows timeScale.
+    if (!this.winning) this.levelTime += realDt;
+    if (this._slowT > 0) { this._slowT -= realDt; if (this._slowT <= 0) { this._slowT = 0; this.timeScale = 1; } }
+    const dt = realDt * this.timeScale;
     this.time += dt;
-    if (!this.winning) this.levelTime += dt;
     const p = this.player;
 
     // entities
@@ -226,8 +253,8 @@ export class World {
 
     // positional hints
     const ptx = Math.floor(p.cx / TILE);
-    for (const s of this.says) if (!s.done && ptx >= s.x && (s.y === undefined || Math.abs(Math.floor(p.cy / TILE) - s.y) <= 3)) { s.done = true; this.say(s.text, s.seconds || 3.5); }
-    if (this.hint) { this.hint.t += dt; if (this.hint.t > this.hint.dur) this.hint = null; }
+    for (const s of this.says) if (!s.done && ptx >= s.x && (s.y === undefined || Math.abs(Math.floor(p.cy / TILE) - s.y) <= 3)) { s.done = true; this._hintQueue.push({ text: s.text, seconds: s.seconds || 3.5 }); }
+    this._stepHints(realDt);
     if (this.flashT > 0) this.flashT -= dt;
 
     // faint sequence
@@ -254,16 +281,38 @@ export class World {
     this.camera.update(dt, p, this.game.view, this.level);
   }
 
+  /**
+   * Hints never stack: nothing shows under the level banner, queued lines (level hint, `says`) wait
+   * for the current hint, and a queued line may cut a previous queued one short once it has been
+   * readable for 2.5 s (so a fast player still gets the next tip). world.say() shows at once.
+   */
+  _stepHints(dt) {
+    const banner = this.bannerOn;
+    const h = this.hint;
+    if (this._hintQueue.length && !banner) {
+      const busy = h && h.t < h.dur - 0.3 && !(h.queued && h.t > 2.5);
+      if (!busy) { const q = this._hintQueue.shift(); this.say(q.text, q.seconds); this.hint.queued = true; }
+    }
+    if (this.hint && !banner) { this.hint.t += dt; if (this.hint.t > this.hint.dur) this.hint = null; }
+  }
+
   // ================================================================================ render
   _buildWaterPath() {
     if (typeof Path2D === 'undefined') return;
     const path = new Path2D();
     let any = false;
-    for (let ty = 0; ty < this.h; ty++) for (let tx = 0; tx < this.w; tx++) {
-      if (this.level.tile[ty][tx] !== '~') continue;
-      const top = this.isSurfaceTile(tx, ty) ? ty * TILE + SURFACE_BAND : ty * TILE;
-      path.rect(tx * TILE, top, TILE, (ty + 1) * TILE - top);
-      any = true;
+    // one rect per horizontal run of water with the same top (keeps the per-frame caustic clip cheap)
+    for (let ty = 0; ty < this.h; ty++) {
+      const row = this.level.tile[ty];
+      let tx = 0;
+      while (tx < this.w) {
+        if (row[tx] !== '~') { tx++; continue; }
+        const surf = this.isSurfaceTile(tx, ty), s = tx;
+        while (tx < this.w && row[tx] === '~' && this.isSurfaceTile(tx, ty) === surf) tx++;
+        const top = surf ? ty * TILE + SURFACE_BAND : ty * TILE;
+        path.rect(s * TILE, top, (tx - s) * TILE, (ty + 1) * TILE - top);
+        any = true;
+      }
     }
     this.waterPath = any ? path : null;
   }

@@ -110,3 +110,10 @@ export function applyLinkState(tile, ents, onIds) {
   }
   return tile;
 }
+
+/**
+ * Does a JUMP press at a valve wheel turn it? Only when no direction is held: holding MOVE means
+ * "hop / swim on", so waiting at a wheel and then hopping away never turns it straight back, and
+ * swimming past a submerged wheel while stroking never toggles it.
+ */
+export function valveAcceptsPress(dir) { return dir === 0; }

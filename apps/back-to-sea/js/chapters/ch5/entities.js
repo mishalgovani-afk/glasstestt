@@ -17,7 +17,7 @@ const CAT_SCALE = 0.88;          // Smudge's size relative to cat.js's drawing u
 const lerp = (a, b, k) => a + (b - a) * k;
 const ease = (k) => { k = Math.max(0, Math.min(1, k)); return k * k * (3 - 2 * k); };
 const boxOf = (p) => ({ x: p.body.x, y: p.body.y, w: p.body.w, h: p.body.h });
-const findBoss = (world) => world._ch5 || null;
+const findBoss = (world) => world.vars.boss || null;
 
 // ============================================================================ leaks & drips
 
@@ -26,7 +26,7 @@ class Drip extends Entity {
   update(dt, world) {
     this.vy = Math.min(this.vy + 900 * dt, 520);
     this.y += this.vy * dt;
-    for (const c of world._ch5Catchers || []) {
+    for (const c of world.vars.catchers || []) {
       if (!c.dead && c.catches && c.catches(this)) { this.dead = true; return; }
     }
     const tx = Math.floor(this.cx / TILE), ty = Math.floor((this.y + this.h) / TILE);
@@ -91,10 +91,10 @@ export class CatEyes extends Entity {
     if (!this.gone && p.cx / TILE >= this.shadowAt) {
       this.gone = true; this.shadowT = 0;
       world.audio.sfx('growl', { x: this.ex });
-      world._ch5Flash = 0.9;
+      world.vars.flash = 0.9;
     }
     if (this.shadowT >= 0) this.shadowT += dt;
-    if (world._ch5Flash > 0) world._ch5Flash = Math.max(0, world._ch5Flash - dt * 2.5);
+    if (world.vars.flash > 0) world.vars.flash = Math.max(0, world.vars.flash - dt * 2.5);
   }
   draw(ctx, world) {
     const p = world.player;
@@ -124,7 +124,7 @@ export class WateringCan extends Entity {
     this.setBox(2, 8, 20, 16);
     this.home = { x: this.x, y: this.y };
     this.fill = 1; this.tilt = 0; this.pourT = -1; this.wasOn = false; this.fallen = false; this.fall = null;
-    (world._ch5Catchers = world._ch5Catchers || []).push(this);
+    (world.vars.catchers = world.vars.catchers || []).push(this);
   }
   get standing() {
     const p = this.world.player, gb = p && p.body.groundBox;
@@ -286,7 +286,7 @@ export class Bubble extends Entity {
   onPlayerOverlap(p, world) {
     if (this.grow < 0.6) return;
     if (!this.held) {
-      if ((p._ch5BubbleCD || 0) > world.time) return;
+      if ((world.vars.bubbleCD || 0) > world.time) return;
       this.held = true; this.life = Math.min(this.life, 7);
       world.audio.sfx('bubble', { x: this.cx });
       world.particles.sparkle(this.cx, this.cy, 6, '#ffffff');
@@ -305,7 +305,7 @@ export class Bubble extends Entity {
   pop(world, boosted) {
     if (this.dead) return;
     this.dead = true;
-    world.player._ch5BubbleCD = world.time + 0.35;
+    world.vars.bubbleCD = world.time + 0.35;
     world.audio.sfx('pop5', { x: this.cx, pitch: boosted ? 1 : 1.3 });
     world.particles.emit({ x: this.cx, y: this.cy, count: 10, kind: 'drop', color: 'rgba(240,250,255,.9)', speed: 120, gravity: 400, life: 0.4, size: 1.4 });
   }
@@ -339,7 +339,7 @@ export class GutterCurrent extends Entity {
     if (!p.inWater || !this.overlaps(p.body)) return false;
     p.launch(this.dir * 430, -540);
     p.body.leapT = 0.14;
-    p._ch5DashT = world.time;
+    world.vars.dashT = world.time;
     world.audio.sfx('dash5', { x: p.cx });
     world.splash(p.cx, this.y, 0.8, true);
     world.particles.bubbles(p.cx - this.dir * 10, p.cy, 6);
@@ -480,7 +480,7 @@ export class CatBoss extends Entity {
   static tile = '.';
   init(world) {
     let start = 1;
-    try { const q = new URLSearchParams(globalThis.location ? globalThis.location.search : ''); start = +q.get('phase') || 1; } catch { start = 1; }
+    start = +world.params.get('phase') || 1;   // debug: ?level=5-2&phase=2|3
     this.fight = createFight(start);
     this.debugStart = start > 1;
     this.home = { x: this.tx * TILE + 12, y: (this.ty + 1) * TILE };
@@ -495,19 +495,18 @@ export class CatBoss extends Entity {
     this.started = false; this.contactCD = 0; this.saidLocked = false;
     this.cx0 = this.home.x;                      // the cat's current floor x
     this.layer = -1;                             // behind the can, bottle, bubbles and valves
-    world._ch5 = this;
-    world._ch5Flash = 0;
+    world.vars.boss = this;
+    world.vars.flash = 0;
     world.lockCamera({ x: 0, y: 0, w: world.level.pxW, h: world.level.pxH });
-    installSlowMo(world);
   }
 
   // ---------------------------------------------------------------- helpers
   get phase() { return this.fight.phase; }
-  slow(scale, seconds) { const w = this.world; w._ts = scale; w._slowT = seconds; }
+  slow(scale, seconds) { this.world.slowMo(scale, seconds); }
   later(t, fn) { this.queue.push({ t, fn }); }
-  music(m) { const a = this.world.game && this.world.game.audio; if (a) a.setMusic(m); }
+  music(m) { this.world.setMusic(m); }
   syncBar() { this.bar.hp = this.fight.hp; }
-  flash(k = 1) { this.world._ch5Flash = Math.max(this.world._ch5Flash || 0, k); }
+  flash(k = 1) { this.world.vars.flash = Math.max(this.world.vars.flash || 0, k); }
 
   firstUpdate(world) {
     this.started = true;
@@ -517,7 +516,7 @@ export class CatBoss extends Entity {
     this.can = world.findEntities((e) => e instanceof WateringCan)[0] || null;
     this.bottle = world.findEntities((e) => e instanceof SoapBottle)[0] || null;
     this.valves = world.findEntities((e) => e instanceof Valve);
-    world.on('faint', () => { world._ts = 1; world._slowT = 0; this.atk = null; });
+    world.on('faint', () => { this.atk = null; });   // the World resets slow-mo itself
     if (this.debugStart) {
       // ?phase=N: skip straight to that phase's set-up
       if (this.can) this.can.knock(world);
@@ -550,7 +549,7 @@ export class CatBoss extends Entity {
     this.hurt = Math.max(0, this.hurt - dt * 1.2);
     this.wet = Math.max(0, this.wet - dt * 0.08);
     this.contactCD = Math.max(0, this.contactCD - dt);
-    if (world._ch5Flash > 0) world._ch5Flash = Math.max(0, world._ch5Flash - dt * 2);
+    if (world.vars.flash > 0) world.vars.flash = Math.max(0, world.vars.flash - dt * 2);
     for (const q of this.queue) q.t -= dt;
     const due = this.queue.filter((q) => q.t <= 0); this.queue = this.queue.filter((q) => q.t > 0);
     for (const q of due) q.fn();
@@ -659,7 +658,7 @@ export class CatBoss extends Entity {
     const b = boxOf(p);
     const f = this.fight;
     if (this.phase === 2 && f.state === 'fight' && this.mode === 'fight' && circleHitsBox(pts.head.x, pts.head.y, pts.headR + 4, b)) {
-      const dashing = world.time - (p._ch5DashT || -9) < 0.9;
+      const dashing = world.time - (world.vars.dashT ?? -9) < 0.9;
       if (p.vy > 40 || dashing) {
         this.onNoseHit(world, p);
         return;
@@ -685,7 +684,7 @@ export class CatBoss extends Entity {
   }
   onNoseHit(world, p) {
     p.launch((p.cx < this.pose.x ? -1 : 1) * 170, -460);
-    p._ch5DashT = -9;
+    world.vars.dashT = -9;
     world.audio.sfx('boing', { x: p.cx });
     this.damage('nose');
   }
@@ -804,7 +803,6 @@ export class CatBoss extends Entity {
     this.spray = null;
     if (this.phase === 3) { this.hoseOn = false; this.unflood(world); }
     if (this.phase >= 2) { if (this.can) this.can.knock(world); if (this.bottle) this.bottle.knock(world, true); }
-    world._ts = 1;
   }
 
   // ---------------------------------------------------------------- animation
@@ -926,18 +924,6 @@ function groundBelow(world, x, y) {
     if (c === '~') return ty * TILE;
   }
   return null;
-}
-
-/** Slow motion: wrap this world's step so the boss can scale time (real-time countdown). */
-function installSlowMo(world) {
-  if (world._ch5Step) return;
-  world._ch5Step = true; world._ts = 1; world._slowT = 0;
-  const orig = world.step.bind(world);
-  world.step = (dt, input) => {
-    const s = world._ts ?? 1;
-    orig(dt * s, input);
-    if (world._slowT > 0) { world._slowT -= dt; if (world._slowT <= 0) world._ts = 1; }
-  };
 }
 
 // ============================================================================ validator rules

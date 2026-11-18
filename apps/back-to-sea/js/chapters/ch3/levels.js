@@ -160,8 +160,8 @@ function l5() {
   g.rect(26, 2, 13, 13, '#');
   g.drum(33, 8, 4, 0);
   g.rect(26, 7, 3, 2, '.');
-  g.rect(37, 7, 2, 2, '.');
-  g.set(33, 8, 'M').prop(33, 8, { cx: 33, cy: 8, r: 4, step: 0.9, ccw: true });
+  g.rect(37, 6, 2, 4, '.');                            // exit porthole: 4 tall, so R / UR / DR all get out
+  g.set(33, 8, 'M').prop(33, 8, { cx: 33, cy: 8, r: 4, step: 1.05, ccw: true });
   // counter B
   g.rect(44, 11, 14, 4, '#');
   g.set(46, 10, '-').set(47, 10, '-').set(53, 10, '^').set(50, 9, 'o').set(56, 10, 'C');
@@ -170,8 +170,8 @@ function l5() {
   g.rect(58, 2, 15, 13, '#');
   g.drum(66, 8, 4, 0);
   g.rect(58, 9, 4, 2, '.');
-  g.rect(70, 6, 3, 3, '.');
-  g.set(66, 8, 'M').prop(66, 8, { cx: 66, cy: 8, r: 4, step: 0.8 });
+  g.rect(70, 5, 3, 5, '.');                            // exit porthole up on the right, 5 tall
+  g.set(66, 8, 'M').prop(66, 8, { cx: 66, cy: 8, r: 4, step: 1.0 });
   // high shelf with the floor drain
   g.rect(78, 10, 14, 4, '#').set(86, 9, 'E').set(81, 9, 'o');
   vents(g, 12, 17); vents(g, 39, 43); vents(g, 73, 77);
@@ -185,10 +185,10 @@ function l5() {
     decor: [
       { type: 'bucket', x: 1, y: 11, w: 11, h: 4, hideTiles: true },
       { type: 'counter', x: 18, y: 9, w: 8, h: 6, hideTiles: true },
-      { type: 'washer', x: 26, y: 2, w: 13, h: 13, hideTiles: true, cx: 33, cy: 8, r: 4, door: { x: 37, y: 7, w: 2, h: 2 }, door2: { x: 26, y: 7, w: 3, h: 2 } },
+      { type: 'washer', x: 26, y: 2, w: 13, h: 13, hideTiles: true, cx: 33, cy: 8, r: 4, door: { x: 37, y: 6, w: 2, h: 4 }, door2: { x: 26, y: 7, w: 3, h: 2 } },
       { type: 'counter', x: 44, y: 11, w: 14, h: 4, hideTiles: true },
       { type: 'board', x: 52, y: 10, w: 3, h: 1 },
-      { type: 'washer', x: 58, y: 2, w: 15, h: 13, hideTiles: true, cx: 66, cy: 8, r: 4, door: { x: 70, y: 6, w: 3, h: 3 }, door2: { x: 58, y: 9, w: 4, h: 2 } },
+      { type: 'washer', x: 58, y: 2, w: 15, h: 13, hideTiles: true, cx: 66, cy: 8, r: 4, door: { x: 70, y: 5, w: 3, h: 5 }, door2: { x: 58, y: 9, w: 4, h: 2 } },
       { type: 'counter', x: 78, y: 10, w: 14, h: 4, hideTiles: true },
     ],
   });
@@ -209,8 +209,9 @@ function l6() {
   g.rect(40, 1, 15, 14, '#');
   g.drum(48, 7, 4, 0);
   g.rect(40, 6, 4, 2, '.');
-  g.rect(52, 7, 3, 2, '.');
-  g.set(48, 7, 'M').prop(48, 7, { cx: 48, cy: 7, r: 4, step: 0.9, ccw: true });
+  g.rect(52, 5, 3, 5, '.');                            // exit porthole: 5 tall with its sill level with
+                                                       // the drum floor, so a low dash can't stall in it
+  g.set(48, 7, 'M').prop(48, 7, { cx: 48, cy: 7, r: 4, step: 1.1, ccw: true });
   // the draining basin: flows funnel toward the floor drain
   g.rect(60, 11, 24, 3, '#').rect(61, 11, 22, 3, '~');
   g.flow('Y', 61, 12, 10, 2).flow('D', 71, 12, 1, 2).flow('Z', 72, 12, 10, 2);
@@ -220,7 +221,7 @@ function l6() {
     id: '3-6', name: 'Down the Drain', budget: 75,
     hint: 'Pipe, counter, washer. Then the floor drain!',
     says: [
-      { x: 41, y: 7, text: 'It spins the other way. Get next to the porthole, then dash!', seconds: 4.5 },
+      { x: 41, y: 7, text: 'It spins the other way. When the arrow points at the porthole, dash!', seconds: 4.5 },
       { x: 62, y: 12, text: 'The basin drains toward the floor drain. Let it pull you in!', seconds: 4.5 },
     ],
     decor: [
@@ -229,7 +230,7 @@ function l6() {
       { type: 'counter', x: 25, y: 8, w: 12, h: 7, hideTiles: true },
       { type: 'board', x: 34, y: 7, w: 3, h: 1 },
       { type: 'line', x: 28, y: 2, w: 6, h: 1 },
-      { type: 'washer', x: 40, y: 1, w: 15, h: 14, hideTiles: true, cx: 48, cy: 7, r: 4, door: { x: 52, y: 7, w: 3, h: 2 }, door2: { x: 40, y: 6, w: 4, h: 2 } },
+      { type: 'washer', x: 40, y: 1, w: 15, h: 14, hideTiles: true, cx: 48, cy: 7, r: 4, door: { x: 52, y: 5, w: 3, h: 5 }, door2: { x: 40, y: 6, w: 4, h: 2 } },
       { type: 'basin', x: 60, y: 11, w: 24, h: 3, hideTiles: true },
     ],
   });

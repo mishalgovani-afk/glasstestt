@@ -1,7 +1,7 @@
 // In-game HUD, drawn on the canvas in screen space: moisture drop gauge, level name, play timer,
 // hint pill, level intro banner, boss bar. Pause/mute are DOM buttons (index.html).
 
-import { LOW_MOISTURE, MOISTURE_MAX } from '../core/constants.js';
+import { LOW_MOISTURE, MOISTURE_MAX, LEVEL_BANNER_T } from '../core/constants.js';
 import { grad, rgba, roundRect, mix } from '../core/draw.js';
 
 export const FONT = 'ui-rounded, "SF Pro Rounded", "Nunito", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif';
@@ -91,9 +91,9 @@ export function drawHUD(ctx, view, world) {
   }
 
   // ---- level intro banner
-  const it = world.levelTime;
-  if (it < 2.6 && !world.boss) {
-    const a = Math.min(1, it / 0.35) * Math.min(1, (2.6 - it) / 0.6);
+  const it = world.levelTime, BT = LEVEL_BANNER_T;
+  if (it < BT && !world.boss) {
+    const a = Math.min(1, it / 0.35) * Math.min(1, (BT - it) / 0.6);
     ctx.save();
     ctx.globalAlpha = a;
     ctx.textAlign = 'center';
@@ -109,7 +109,7 @@ export function drawHUD(ctx, view, world) {
 
   // ---- hint pill
   const h = world.hint;
-  if (h && h.t > 0) {
+  if (h && h.t > 0 && !world.bannerOn) {
     const a = Math.min(1, h.t / 0.25) * Math.min(1, (h.dur - h.t) / 0.4);
     ctx.save();
     ctx.globalAlpha = Math.max(0, a);

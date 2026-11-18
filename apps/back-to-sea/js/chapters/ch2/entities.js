@@ -44,10 +44,9 @@ function windAt(world, x, y) {
   }
   return clamp(v, -B.MAX_WIND, B.MAX_WIND);
 }
-function inputDir(world) {
-  const i = world.game && world.game.input;
-  return i && i.dir ? i.dir() : 0;
-}
+const inputDir = (world) => world.input.dir();
+// Shared per-level bubble state lives in world.vars.bubbles: { carrier, lastPopT, hinted }.
+const bub = (world) => world.vars.bubbles || (world.vars.bubbles = { carrier: null, lastPopT: -9, hinted: false });
 
 // ---------------------------------------------------------------------------------------------
 /** A live bubble: either loose (floating, capturable) or carrying the fish. */
@@ -70,7 +69,7 @@ export class FreeBubble extends Entity {
 
   capture(world, p) {
     this.mode = 'carry';
-    world._bubbleCarrier = this;
+    bub(world).carrier = this;
     this.carryT = 0; this.s.t = 0; this.s.vx = 0; this.s.vy = 0;
     this.fx = p.cx; this.fy = p.cy;
     p.buffer = 0; p.coyote = 0;
@@ -78,12 +77,12 @@ export class FreeBubble extends Entity {
     p.squash(1.25, 0.8);
     world.audio.sfx('bloop', { x: this.s.x });
     world.particles.sparkle(this.s.x, this.s.y, 5, '#ffffff');
-    if (!world._bubbleHinted && world.def.id === '2-1') { world._bubbleHinted = true; world.say('MOVE to steer the bubble. JUMP to pop it for a boost!', 3.2); }
+    if (!bub(world).hinted && world.def.id === '2-1') { bub(world).hinted = true; world.say('MOVE to steer the bubble. JUMP to pop it for a boost!', 3.2); }
   }
 
   release(world) {
-    if (world._bubbleCarrier === this) world._bubbleCarrier = null;
-    world._lastPopT = world.time;
+    if (bub(world).carrier === this) bub(world).carrier = null;
+    bub(world).lastPopT = world.time;
     if (this.home) this.home.onCarrierGone();
     this.dead = true;
   }
@@ -129,8 +128,8 @@ export class FreeBubble extends Entity {
   }
 
   onPlayerOverlap(player, world) {
-    if (this.mode !== 'free' || this.grow < 0.5 || world._bubbleCarrier || !player.alive || world.fainting) return;
-    if (world.time - (world._lastPopT ?? -9) < 0.3) return;
+    if (this.mode !== 'free' || this.grow < 0.5 || bub(world).carrier || !player.alive || world.fainting) return;
+    if (world.time - bub(world).lastPopT < 0.3) return;
     this.capture(world, player);
   }
   onJump(player, world) {
@@ -138,7 +137,7 @@ export class FreeBubble extends Entity {
     if (this.carryT >= B.GRACE) this.pop(world, 'jump');
     return true; // always swallow the press while carried (never fall through to a hop)
   }
-  onRespawn(world) { if (world._bubbleCarrier === this) world._bubbleCarrier = null; this.dead = true; }
+  onRespawn(world) { if (bub(world).carrier === this) bub(world).carrier = null; this.dead = true; }
 
   draw(ctx, world) {
     const s = this.s, t = this.time;
@@ -174,12 +173,12 @@ export class Bubble extends Entity {
     this.time += dt;
     if (this.state === 'gone') {
       this.rt -= dt;
-      if (this.rt <= 0 && !world._bubbleCarrier) { this.state = 'idle'; this.appear = 0; this.wet = true; world.particles.sparkle(this.cx, this.cy, 4, '#ffffff'); world.audio.sfx('blow', { vol: 0.4, x: this.cx }); }
+      if (this.rt <= 0 && !bub(world).carrier) { this.state = 'idle'; this.appear = 0; this.wet = true; world.particles.sparkle(this.cx, this.cy, 4, '#ffffff'); world.audio.sfx('blow', { vol: 0.4, x: this.cx }); }
     } else if (this.state === 'idle') this.appear = Math.min(1, this.appear + dt * 3);
   }
   onPlayerOverlap(player, world) {
-    if (this.state !== 'idle' || world._bubbleCarrier || !player.alive || world.fainting || world.winning) return;
-    if (world.time - (world._lastPopT ?? -9) < 0.3) return;
+    if (this.state !== 'idle' || bub(world).carrier || !player.alive || world.fainting || world.winning) return;
+    if (world.time - bub(world).lastPopT < 0.3) return;
     this.state = 'busy'; this.wet = false;
     world.spawn(new FreeBubble(world, this.x, this.y, { mode: 'carry', home: this }));
   }

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import laundry from '../js/chapters/ch3-laundry.js';
-import { dashLaunch, dirVec, drumState, DRUM_ORDER, DASH_SPEED, DASH_T, DRIFT_SPEED, inDrum } from '../js/chapters/ch3/flow.js';
+import { dashLaunch, dirVec, drumState, drumDashDir, DRUM_ORDER, DRUM_GRACE, DASH_SPEED, DASH_T, DRIFT_SPEED, inDrum } from '../js/chapters/ch3/flow.js';
 import { validateLevel } from '../js/core/validate.js';
 import { parseLevel } from '../js/core/level.js';
 import { SWIM_SPEED, LEAP_BALLISTIC, TILE } from '../js/core/constants.js';
@@ -30,6 +30,24 @@ test('drum: 8 directions, clockwise by default, ccw reverses, steps on schedule'
   assert.equal(drumState(8.01).dir, 'U');
   assert.ok(drumState(0.5).phase > 0.45 && drumState(0.5).phase < 0.55);
   assert.ok(inDrum({ cx: 10, cy: 10, r: 2 }, 10 * TILE, 10 * TILE) && !inDrum({ cx: 10, cy: 10, r: 2 }, 13 * TILE, 10 * TILE));
+});
+
+test('drum: a press just after a tick still dashes the way the arrow pointed (reaction grace)', () => {
+  assert.ok(DRUM_GRACE > 0.1 && DRUM_GRACE < 0.4);
+  assert.equal(drumDashDir(0.05), 'U');                                  // no previous step yet
+  assert.equal(drumDashDir(1.05), 'U');                                  // just ticked to UR
+  assert.equal(drumDashDir(1.0 + DRUM_GRACE + 0.01), 'UR');
+  assert.equal(drumDashDir(2.1, { ccw: true, step: 1.1 }), 'UL');        // ccw, inside step 2 of 1.1 s
+  assert.equal(drumDashDir(2.2 + 0.05, { ccw: true, step: 1.1 }), 'UL'); // ticked to L, still in grace
+});
+
+test('drum exits: every drum has a porthole at least 4 tiles tall on its exit side', () => {
+  for (const lv of laundry.levels) for (const d of lv.decor || []) {
+    if (d.type !== 'washer' || !d.door) continue;
+    assert.ok(d.door.h >= 4, `${lv.id} washer at x=${d.x}: exit porthole is ${d.door.h} tall`);
+    for (let y = d.door.y; y < d.door.y + d.door.h; y++) for (let x = d.door.x; x < d.door.x + d.door.w; x++)
+      assert.notEqual(lv.map[y][x], '#', `${lv.id} porthole cell ${x},${y} must be open`);
+  }
 });
 
 test('chapter shape: entities, reach rules and budgets', () => {

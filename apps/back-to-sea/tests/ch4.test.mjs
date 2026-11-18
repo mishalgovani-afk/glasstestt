@@ -8,12 +8,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import basement from '../js/chapters/ch4-basement.js';
-import { Plumbing, Fill, doorBlockedCount, applyLinkState } from '../js/chapters/ch4/logic.js';
+import { Plumbing, Fill, doorBlockedCount, applyLinkState, valveAcceptsPress } from '../js/chapters/ch4/logic.js';
 import { validateLevel } from '../js/core/validate.js';
 import { parseLevel } from '../js/core/level.js';
 import * as K from '../js/core/constants.js';
 
 // ------------------------------------------------------------------------------------ logic
+test('valves turn only on a JUMP with no direction held (hopping away never turns one back)', () => {
+  assert.equal(valveAcceptsPress(0), true);
+  assert.equal(valveAcceptsPress(1), false);
+  assert.equal(valveAcceptsPress(-1), false);
+});
+
 test('Plumbing: toggle, timers drift back, checkpoint snapshot restores', () => {
   const p = new Plumbing();
   assert.equal(p.isOn('a'), false);
