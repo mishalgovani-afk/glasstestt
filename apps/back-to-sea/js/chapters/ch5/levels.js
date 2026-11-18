@@ -48,7 +48,7 @@ export const levels = [
     ],
   },
   {
-    id: '5-2', name: 'The Storm Drain', budget: 150,
+    id: '5-2', name: 'The Cat at the Grate', budget: 150,
     hint: 'The storm drain is right there...',
     map: [
       '##################################',

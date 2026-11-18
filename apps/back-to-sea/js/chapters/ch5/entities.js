@@ -106,9 +106,9 @@ export class CatEyes extends Entity {
     if (this.shadowT >= 0 && this.shadowT < 3.2) {
       // a huge cat silhouette slinking along the back wall in the lightning
       const k = this.shadowT / 3.2;
-      const pose = defaultPose(this.ex - 60 + k * 620, this.ey + 80, 1);
-      pose.crouch = 0.75; pose.air = 0; pose.sx = 1.25; pose.sy = 1.15; pose.tailT = this.time; pose.tailAmp = 0.6;
-      pose.silhouette = '#05070b'; pose.alpha = 0.55 * Math.min(1, k * 6) * Math.min(1, (1 - k) * 5);
+      const pose = defaultPose(this.ex - 120 + k * 700, this.ey + 30, 1);
+      pose.crouch = 0.75; pose.air = 0; pose.sx = 1.7; pose.sy = 1.45; pose.tailT = this.time; pose.tailAmp = 0.6;
+      pose.silhouette = '#0a1220'; pose.alpha = 0.32 * Math.min(1, k * 6) * Math.min(1, (1 - k) * 5);
       drawCat(ctx, pose);
     }
   }
@@ -627,7 +627,8 @@ export class CatBoss extends Entity {
       this.cool -= dt;
       if (this.cool > 0) return;
       const n = (this.pounces = (this.pounces || 0) + 1);
-      const tx = Math.max(9.6 * TILE, Math.min(31 * TILE, p.cx));
+      // never lands on the hose valve (col 10): its body would cover it; the far side is the fight
+      const tx = Math.max(13.5 * TILE, Math.min(31 * TILE, p.cx));
       this.atk = { kind: 'pounce', t: 0, x0: this.cx0, x1: tx, crouch: beat * 1.1, air: beat * 0.75, n };
       return;
     }
@@ -665,6 +666,7 @@ export class CatBoss extends Entity {
       }
     }
     if (this.contactCD > 0) return;
+    if (this.valves && this.valves.some((v) => v.usable(world) && v.overlaps(b))) return; // don't shove you off a valve
     const bx = pts.body;
     if (b.x < bx.x + bx.w && b.x + b.w > bx.x && b.y < bx.y + bx.h && b.y + b.h > bx.y && b.y + b.h > bx.y + 30) {
       const dir = p.cx < this.pose.x ? -1 : 1;
@@ -709,7 +711,7 @@ export class CatBoss extends Entity {
     this.atk = null; this.cool = 1.6;
     for (const b of w.findEntities((e) => e instanceof Bubble)) if (!b.held) b.pop(w, false);
     this.hurt = 1; this.wet = 1;
-    w.shake(0.55); w.flash('#e9f7ff', 0.08); this.flash(0.3);
+    w.shake(0.55); w.flash('rgba(233,247,255,0.45)', 0.1); this.flash(0.3);
     w.audio.sfx('yowl', { x: this.pose.x });
     this.slow(0.3, 0.55);
     const pts = catPoints(this.pose);

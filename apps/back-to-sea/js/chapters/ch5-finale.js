@@ -23,7 +23,7 @@ const pt = (o) => o.pitch || 1;
 
 export default {
   id: 'finale', number: 5,
-  title: 'The Storm Drain', subtitle: 'The cat at the grate',
+  title: 'The Storm Drain', subtitle: 'Rain, a grate, and a cat',
   mechanic: { name: 'Everything you learned', hint: 'Puddles, bubbles, currents and valves: use them all to get past the cat.' },
   palette: P,
   drawBackground, drawSolidTile, drawOneWayTile, drawDecor, drawHazard, drawForeground,
