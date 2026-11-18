@@ -306,8 +306,10 @@ export class Bubble extends Entity {
 
 - **Tiles:**
   - `tileAt(tx, ty)` returns `. # = ~ - ^`.
-  - `setTile(tx, ty, c)` re-renders that chunk and rebuilds the water surfaces. Use it for rising
-    water and opening walls.
+  - `setTile(tx, ty, c)` queues a re-render of only the rows it can change (water: the row above
+    down through the depth shading, `WATER_DEPTH_ROWS`; back layer: ±1 row, and only when a `#` or
+    `=` appears or goes), flushed once per step, and rebuilds the water surfaces. Use it for rising
+    water and opening walls; flooding a whole hall row by row is cheap.
   - `isSolid(tx, ty)`, `isWater(tx, ty)`, `waterAtPx(px, py)`, `solidAtPx(px, py)`.
 - **Entities:** `spawn(entity)` (runs `init`), `findEntities(pred)`.
 - **Effects:**
@@ -323,7 +325,8 @@ export class Bubble extends Entity {
 - **Flow:** `faint(reason)`, `win()`, `setCheckpoint(tx, ty)`.
 - **Events:** `on(name, fn)` returns an unsubscribe function, and `emit(name, data)`. Built-in
   events: `jump {kind}`, `land`, `enterWater`, `exitWater`, `faint`, `respawn`, `checkpoint`, `win`.
-- **Read-only:** `time`, `levelTime`, `level` (parsed: `w h tile raw spawn exit entities`), `def`,
+- **Read-only:** `time` (simulated, follows `timeScale`), `levelTime` (wall-clock seconds in the
+  level: the HUD timer and best times), `level` (parsed: `w h tile raw spawn exit entities`), `def`,
   `chapter`, `palette`, `exit` (the Exit entity; `exit.locked = true` hides the way out),
   `dryScale` (multiplier on drying speed, default 1).
 
@@ -432,6 +435,30 @@ B: { trigger: true, refill: true, edges: ({ x, y, env, TILE }) => {
 route, which is useful while designing. `tests/levels.test.mjs` runs every level plus control
 fixtures. Add chapter-specific tests in `tests/chN.test.mjs`.
 
+## Chapter hooks (added by integration)
+
+Chapter code talks to the game only through the World. Never reach for `window.__bts`,
+`location`, `world.game.input` or ad-hoc `world._something` fields.
+
+- **`world.input`**: read-only `{ dir(), jumpHeld() }` (−1/0/1 and bool; both read 0/false while
+  fainting or winning). For entities that care what is held, e.g. a bubble you steer, or a valve
+  that ignores presses while a direction is held. JUMP presses still arrive only through
+  `onJump`; there is deliberately no way to take a press outside that protocol.
+- **`world.vars`**: a per-level scratch object (a fresh `Object.create(null)` per World) for
+  chapter state shared between entities: `vars.bubbles = { carrier, lastPopT, hinted }` (ch2),
+  `vars.plumb` (ch4 Plumbing), `vars.skid` (ch3), `vars.boss`, `vars.flash`, `vars.catchers`,
+  `vars.dashT`, `vars.bubbleCD` (ch5). Namespace your keys by purpose.
+- **`world.params`**: the page's URL query (`get(name)`, `has(name)`), e.g. `?phase=` for the boss.
+- **Slow motion**: `world.slowMo(scale, seconds)` scales simulated time by `scale` for `seconds` of
+  real time (0 = until changed); `world.timeScale` is the current factor. It resets to 1 on faint
+  and on respawn. `levelTime`, hints and the save's play time stay on real time.
+- **`world.setMusic(schema)`** switches the music (boss phases). **`world.view`** is the logical
+  view `{ w, h, scale, safe }`.
+- **Hints**: `world.say(text, s)` shows at once (replacing the current hint). The level `hint` and
+  `says` lines are queued instead: none show under the level-name banner (`LEVEL_BANNER_T` = 2.6 s,
+  `world.bannerOn`), they never stack on each other, and a queued line may cut the previous queued
+  one short once it has been up for 2.5 s. Nothing is drawn in the hint pill while the banner shows.
+
 ## Boss & finale hooks
 
 - `world.setBoss({ name, hp, max })` shows a boss bar. The HUD reads the object every frame, so
@@ -441,11 +468,14 @@ fixtures. Add chapter-specific tests in `tests/chN.test.mjs`.
 - `world.exit.locked = true` keeps the level's `E` closed and drawn dim until you unlock it. Or call
   `world.win()` yourself.
 - **Ending.** Completing the last level of the last chapter goes to the ending scene. So does
-  calling `world.finishGame()` (it also records the level as cleared). The ending shows credits and
-  total play time from the save. Customise it on the finale module:
-  `ending: { draw(ctx, view, t, stats) {}, credits: [['Role', 'Name'], 'Line'] }`.
+  calling `world.finishGame()` (it also records the level as cleared). The ending card shows
+  credits, the total play time from the save, and **Play again** (chapter 1 card, 1-1) / Levels /
+  Title, which share one row at any width. Customise it on the finale module:
+  `ending: { draw(ctx, view, t, stats) {}, credits: [...] | (stats) => [...], cardAt?, skipTo?, music? }`.
   - `draw` replaces the default sunrise-sea backdrop, in screen space.
-  - `stats` is `{ total, cleared }`.
+  - `stats` is `{ total, cleared, best: { id: s }, levels: LEVELS }`; `credits` may be a function of it.
+  - `cardAt`: seconds before the card fades in (default 0). A tap before `skipTo` (default `cardAt`)
+    jumps the scene clock `t` to `skipTo`.
 - **Boss entity tips:**
   - Run phases from the entity's `update`.
   - Use `world.shake`, `world.flash`, `world.say` and `world.particles`.
@@ -460,9 +490,39 @@ fixtures. Add chapter-specific tests in `tests/chN.test.mjs`.
   - `http://localhost:8123/apps/back-to-sea/?level=2-3` starts a level directly, skipping the
     title and card.
   - `?debug=1` adds hitboxes, fps, player state and unlocks every level in level select.
-- `window.__bts` is a test hook:
+- `window.__bts` is a test hook (automation only; game code must not use it):
   - `state()` returns player and level info, and `world` is the live World.
   - `input.virtual = { dir, jump }` and `input.pressVirtualJump()` drive the fish without devices.
+  - `hold(true)` stops the real-time loop from stepping the scene (it still renders) and `step(n)`
+    advances n fixed steps, so bots can run faster than real time.
+  - `perf.samples()` returns `[updateMs, renderMs]` for the last 1024 frames (`perf.reset()`).
+- `validateLevel()` also returns `stats.steps`: the route as `[{ to, how }]`, where `how` is
+  `{ mode: 'swim' | 'walk' | 'jump' | 'rule', start?, strat?, dir?, rule? | ed? }`. Replaying it
+  with virtual input drives a bot through the level.
 - **Save** is stored in `localStorage['back-to-sea:v1']`:
   `{ cleared: {id: true}, best: {id: s}, total: s, mute, last }`. A level is unlocked if it is the
   first level, it was cleared, or the previous level was cleared.
+
+## Integration changes (contract updates)
+
+- **`levelTime` is wall-clock.** Under `slowMo` the simulation slows but the HUD timer, best times
+  and total play time do not.
+- **Valves (ch4)** turn only on a JUMP with no direction held (`valveAcceptsPress` in
+  `ch4/logic.js`). Holding a direction means hop/swim on, so waiting at a wheel and then hopping
+  away never turns it straight back, and stroking past a submerged wheel never toggles it.
+  Accepting presses that point toward the wheel was rejected: whether a press points toward the
+  wheel depends on which side of its centre you are on, so a hop on toward the far side would
+  still turn it. To make the rule discoverable instead:
+  - while the fish touches a wheel, an on-wheel prompt shows the JUMP button's glyph and "JUMP"
+    ("STOP + JUMP" while a direction is held, dimmed during the cooldown);
+  - the first press made with a direction held at a wheel you have never turned says "Let go of
+    MOVE, then JUMP to turn the wheel".
+- **Drums (ch3)** are more forgiving. `DRUM_GRACE` (0.22 s): a press just after the arrow ticks
+  round still dashes the way it pointed. `DRUM_PULL`: the eddy pulls you toward the centre, so a
+  passive rider circles about 2 tiles out instead of pinned to the wall. Exit portholes are at
+  least 4 tiles tall (`tests/ch3.test.mjs` checks it). In 3-5 and 3-6 the spin steps are a little
+  slower (1.0–1.1 s).
+- **Tile layers.** A chunk's front layer is dropped when its decor paints nothing in front, so
+  it isn't composited every frame.
+- **Exit / Checkpoint detection** in chapter art uses `e === world.exit` and
+  `e instanceof Checkpoint` (from `core/builtins.js`), never `constructor.name`.

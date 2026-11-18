@@ -32,7 +32,7 @@ The pause and mute buttons on screen do the same as P and M.
 | 1 | Kitchen | Puddles & drips: jump from a puddle for a big splash-hop | 0–7 |
 | 2 | Bathroom | Soap bubbles: touch one to float, then jump to pop it for a boosted jump | 7–14 |
 | 3 | Laundry room | Currents & spin: jump inside a current to dash along its flow | 14–21 |
-| 4 | Basement | Valves & rising water: jump at a valve wheel to turn it and move the water | 21–28 |
+| 4 | Basement | Valves & rising water: stop at a valve wheel and jump to turn it (a JUMP prompt shows on the wheel) | 21–28 |
 | 5 | Garage storm drain | Finale: the cat boss, fought with mechanics from all chapters, then the swim to sea and credits | 28–30+ |
 
 Each chapter opens with a title card that names its mechanic. The first level of a chapter
@@ -49,8 +49,14 @@ times per level, total play time, the mute setting and the last level played. Ev
 wrapped in try/catch, so the game still runs when storage is blocked (private mode, for example),
 but progress is then lost when the page closes.
 
-- **Level select** lists the levels. A level unlocks when it is the first level, it has been
-  cleared, or the level before it has been cleared.
+- **Level select** lists all 26 levels (6 + 6 + 6 + 6 + 2) by chapter. A level unlocks when it is
+  the first level, it has been cleared, or the level before it has been cleared.
+- **Continue** on the title screen starts the first level you have not cleared, with its chapter
+  card if it opens a chapter. Finishing a chapter's last level goes straight to the next chapter's
+  card and first level.
+- The HUD timer counts the current level; the total play time adds up every level you play
+  (retries included) and is shown on the level select and on the ending card, which also offers
+  **Play again**.
 
 ## Run locally
 
@@ -69,6 +75,9 @@ directly, because the game loads ES modules.
 
 - `?level=2-3` jumps straight to a level, skipping the title and card. Level IDs are `chapter-level`.
 - `?debug=1` shows hitboxes, fps and player state, and unlocks every level in level select.
+- `?level=5-2&phase=2` (or `3`) starts the boss fight at that phase.
+- `window.__bts` is a test hook for automated checks: state, virtual input, `hold()`/`step(n)` to
+  run faster than real time, and `perf.samples()` frame costs (see DESIGN.md).
 
 ## Tests
 
@@ -76,7 +85,8 @@ directly, because the game loads ES modules.
 node --test apps/back-to-sea/tests/*.test.mjs
 ```
 
-The tests use only Node's built-in runner, so CI needs no install. `tests/levels.test.mjs` runs the
+The tests use only Node's built-in runner, so CI needs no install. `tests/chN.test.mjs` cover each
+chapter's logic and `tests/core.test.mjs` the tile re-render rules. `tests/levels.test.mjs` runs the
 level validator on every level. The validator searches from the start to the exit using the game's
 own physics, with the real jump heights and the dry-time limit. A level passes only if the fish can
 reach the exit without staying out of water longer than the dry time, with refills at puddles and
@@ -98,7 +108,9 @@ apps/back-to-sea/
 │   ├── chapters/          index.js registry plus ch1-kitchen.js through ch5-finale.js
 │   └── scenes/            title, card, levels, game, hud, ui, ending
 └── tests/
-    └── levels.test.mjs
+    ├── levels.test.mjs   every level through the validator
+    ├── core.test.mjs     engine logic (tile dirty rows)
+    └── ch1–ch5.test.mjs  chapter logic
 ```
 
 Tunable numbers live in `js/core/constants.js`. Chapter rules and level maps are in
