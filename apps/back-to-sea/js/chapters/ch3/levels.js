@@ -123,7 +123,7 @@ function l4() {
   g.drum(22, 9, 4, 0);
   g.rect(14, 8, 4, 2, '~').flow('R', 3, 8, 15, 2);   // inlet pipe through the cabinet
   g.set(4, 8, 'S').set(22, 9, 'M').prop(22, 9, { cx: 22, cy: 9, r: 4, step: 1 });
-  g.rect(26, 8, 2, 2, '.');                            // the porthole door out of the drum
+  g.rect(26, 7, 2, 3, '.');                            // the porthole door out of the drum
   // counter with an iron and drips
   g.rect(33, 11, 15, 4, '#');
   g.set(36, 10, '-').set(37, 10, '-').set(40, 10, '^').set(38, 9, 'o').set(43, 9, 'o').set(45, 10, 'C');
@@ -141,7 +141,7 @@ function l4() {
     ],
     decor: [
       { type: 'pipe', x: 2, y: 7, w: 12, h: 4, hideTiles: true },
-      { type: 'washer', x: 14, y: 2, w: 14, h: 13, hideTiles: true, cx: 22, cy: 9, r: 4, door: { x: 26, y: 8, w: 2, h: 2 } },
+      { type: 'washer', x: 14, y: 2, w: 14, h: 13, hideTiles: true, cx: 22, cy: 9, r: 4, door: { x: 26, y: 7, w: 2, h: 3 } },
       { type: 'counter', x: 33, y: 11, w: 15, h: 4, hideTiles: true },
       { type: 'board', x: 39, y: 10, w: 3, h: 1 },
       { type: 'line', x: 39, y: 5, w: 6, h: 1 },

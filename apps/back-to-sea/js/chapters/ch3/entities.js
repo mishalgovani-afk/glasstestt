@@ -129,7 +129,8 @@ export class Drum extends Entity {
     if (!p.inWater || !this.has(p, world) || p.dashUntil > world.time) return;
     const [vx, vy] = dirVec(this.state(world).dir);
     const dt = 1 / 120;
-    driftBody(world, p.body, vx * 70 * dt, vy * 70 * dt);
+    // the churning water also holds you up (cancels the idle sink), so you ride the spin round
+    driftBody(world, p.body, vx * 70 * dt, (vy * 70 - 40) * dt);
   }
   onJump(p, world) {
     if (!p.inWater || !this.has(p, world) || nearSurface(p.body, world)) return false;
