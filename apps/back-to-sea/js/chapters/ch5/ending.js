@@ -53,6 +53,9 @@ function dom(t) {
         });
         for (const o of menu.querySelectorAll('.btn.primary')) o.classList.remove('primary');
         menu.prepend(b);
+        // three buttons must fit the card: let them share the row
+        menu.style.gap = '8px';
+        for (const o of menu.querySelectorAll('.btn')) Object.assign(o.style, { minWidth: '0', flex: '1 1 0', padding: '12px 8px', fontSize: '15px' });
       }
     }
     node.addEventListener('pointerdown', () => { if (st.lastT + st.skip < T_SEA) st.skip = T_SEA - st.lastT; });
@@ -83,11 +86,11 @@ export function drawEnding(ctx, view, t0, stats) {
 
 // ---------------------------------------------------------------------------- 1. the drop
 function drawDrop(ctx, W, H, t, dt) {
-  ctx.fillStyle = grad(ctx, 0, 0, 0, H, ['#05080d', '#0b141d', '#05080d']);
+  ctx.fillStyle = grad(ctx, 0, 0, 0, H, ['#0b1622', '#12202e', '#0a121b']);
   ctx.fillRect(0, 0, W, H);
   const cx = W / 2, sw = 150;
   // shaft walls: concrete rings rushing upward
-  ctx.fillStyle = grad(ctx, cx - sw, 0, cx + sw, 0, ['#1b232c', '#2e3945', '#141b22', '#2e3945', '#1b232c']);
+  ctx.fillStyle = grad(ctx, cx - sw, 0, cx + sw, 0, ['#2a3644', '#4a5a6b', '#2c3946', '#4a5a6b', '#2a3644']);
   ctx.fillRect(cx - sw, 0, sw * 2, H);
   const speed = 520 + t * 260;
   for (let i = 0; i < 9; i++) {
@@ -97,12 +100,17 @@ function drawDrop(ctx, W, H, t, dt) {
   }
   ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(cx - sw - 6, 0, 10, H); ctx.fillRect(cx + sw - 4, 0, 10, H);
   // falling water sheets
-  ctx.strokeStyle = 'rgba(150,215,240,.35)'; ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(170,225,245,.55)'; ctx.lineWidth = 2;
   for (let i = 0; i < 28; i++) {
     const x = cx - sw + 10 + ((i * 53) % (sw * 2 - 20)), y = ((i * 97 + t * 900) % (H + 60)) - 60;
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 30 + (i % 4) * 10); ctx.stroke();
   }
   // the grate receding above
+  // daylight from the open grate far above, washing down the shaft
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = grad(ctx, 0, 0, 0, H, [rgba('#9fd0f0', 0.35), 'rgba(159,208,240,0)']);
+  ctx.beginPath(); ctx.moveTo(cx - 60, 0); ctx.lineTo(cx + 60, 0); ctx.lineTo(cx + 130, H); ctx.lineTo(cx - 130, H); ctx.fill();
+  ctx.restore();
   const gy = 30 - t * 160;
   if (gy > -40) {
     glow(ctx, cx, gy, 90, '#9fc6e0', 0.35);
