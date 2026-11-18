@@ -99,10 +99,17 @@ export function drawHUD(ctx, view, world) {
     ctx.textAlign = 'center';
     ctx.font = `800 26px ${FONT}`;
     const yy = view.h * 0.38 - (1 - Math.min(1, it / 0.5)) * 10;
-    ctx.fillStyle = 'rgba(0,25,40,.35)'; ctx.fillText(world.def.name, view.w / 2 + 1, yy + 2);
+    // soft dark backdrop so the title reads on bright rooms
+    const nw = Math.min(view.w - 24, ctx.measureText(world.def.name).width + 56);
+    const bg = ctx.createRadialGradient(view.w / 2, yy - 12, 8, view.w / 2, yy - 12, nw / 2 + 20);
+    bg.addColorStop(0, 'rgba(0,20,34,.62)'); bg.addColorStop(0.7, 'rgba(0,20,34,.42)'); bg.addColorStop(1, 'rgba(0,20,34,0)');
+    ctx.save(); ctx.translate(view.w / 2, yy - 12); ctx.scale(1, 0.55); ctx.translate(-view.w / 2, -(yy - 12));
+    ctx.fillStyle = bg; ctx.fillRect(view.w / 2 - nw / 2 - 30, yy - 12 - nw / 2 - 20, nw + 60, nw + 40);
+    ctx.restore();
+    ctx.shadowColor = 'rgba(0,20,34,.85)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 1;
     ctx.fillStyle = '#fff'; ctx.fillText(world.def.name, view.w / 2, yy);
     ctx.font = `700 12px ${FONT}`;
-    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.fillStyle = '#fff';
     ctx.fillText(`${world.chapter.title.toUpperCase()}  ·  ${world.def.id}`, view.w / 2, yy - 28);
     ctx.restore();
   }

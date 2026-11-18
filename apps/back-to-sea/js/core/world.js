@@ -17,6 +17,11 @@ const DEFAULT_PAL = {
   water: '#5cc6e4', waterDeep: '#1d6b97', accent: '#ff8a3d', shelf: '#b9824f', hazard: '#ff5a3a',
 };
 
+/** Logical px at the bottom of the view hidden under on-screen touch buttons (0 without touch). */
+function touchInset() {
+  try { return globalThis.document && document.body.classList.contains('touch') ? 90 : 0; } catch { return 0; }
+}
+
 export class World {
   /**
    * @param game   { audio, view, debug, onLevelComplete(world), onFinishGame(world), reducedMotion }
@@ -86,6 +91,7 @@ export class World {
     this.player = new Player(this, sp.cx, sp.bottom);
     this.tiles = new TileLayers(this, game.view.backingScale);
     this._buildWaterPath();
+    this.camera.inset = touchInset();
     this.camera.snap(this.player, game.view, this.level);
     // the level hint and `says` lines queue behind the level-name banner and each other
     if (this.def.hint) this._hintQueue.push({ text: this.def.hint, seconds: 5.5 });
@@ -205,6 +211,7 @@ export class World {
     p.state = 'air'; p.anim.faintT = 0; p.anim.rot = 0; p.buffer = 0;
     this.timeScale = 1; this._slowT = 0;
     for (const e of this.entities) { try { e.onRespawn(this); } catch (err) { console.error(err); } }
+    this.camera.inset = touchInset();
     this.camera.snap(p, this.game.view, this.level);
     this.emit('respawn', this.checkpoint);
   }
@@ -278,6 +285,7 @@ export class World {
       if (wv.t > 1.0) this.fade = Math.min(1, (wv.t - 1.0) / 0.3);
       if (wv.t > 1.35 && !wv.done) { wv.done = true; this.game.onLevelComplete && this.game.onLevelComplete(this); }
     }
+    this.camera.inset = touchInset();
     this.camera.update(dt, p, this.game.view, this.level);
   }
 
@@ -317,6 +325,14 @@ export class World {
     this.waterPath = any ? path : null;
   }
 
+  /** When the camera scrolls below the level (touch controls), continue the floor colour there. */
+  _fillBelow(ctx, cam, view) {
+    const bottom = this.level.pxH;
+    if (cam.y + view.h <= bottom) return;
+    ctx.fillStyle = this.palette.solid || this.palette.wallB;
+    ctx.fillRect(cam.x - 8, bottom, view.w + 16, cam.y + view.h - bottom + 8);
+  }
+
   render(ctx, view, alpha) {
     const cam = this.camera.view(alpha, view.backingScale);
     const ch = this.chapter;
@@ -350,6 +366,7 @@ export class World {
     this.waters.draw(ctx, cam, view, this.palette);
     this.particles.draw(ctx, cam, view);
     this.tiles.draw(ctx, 'front', cam, view);
+    this._fillBelow(ctx, cam, view);
     if (this.game.debug) this._drawDebug(ctx);
     ctx.restore();
 

@@ -43,7 +43,7 @@ body.playing.paused #touch { pointer-events: none; }
   transition: transform .08s ease, background .12s ease, opacity .3s;
   opacity: 0; pointer-events: none;
 }
-body.touch .tbtn { opacity: .55; }
+body.touch .tbtn { opacity: .42; }
 .tbtn svg { width: 46%; height: 46%; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 1px rgba(0,0,0,.3)); }
 .tbtn.left, .tbtn.right { width: 66px; height: 66px; bottom: calc(12px + var(--sb)); }
 .tbtn.left { left: calc(14px + var(--sl)); }

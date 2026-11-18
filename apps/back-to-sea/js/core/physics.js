@@ -76,7 +76,9 @@ export function stepBody(b, dir, dt, env) {
     b.vx = approach(b.vx, dir * SWIM_SPEED, (dir ? SWIM_ACCEL : SWIM_DECEL) * dt);
     b.vy = Math.min(b.vy + GRAVITY * dt, MAX_FALL);
   } else if (b.onGround) {
-    b.vx = approach(b.vx, dir * WRIGGLE_SPEED, (dir ? GROUND_ACCEL : GROUND_DECEL) * dt);
+    // landing momentum above wriggle speed is shed quickly so a landing doesn't slide into hazards
+    const brake = Math.abs(b.vx) > WRIGGLE_SPEED && (!dir || Math.sign(b.vx) === dir);
+    b.vx = approach(b.vx, dir * WRIGGLE_SPEED, (brake ? GROUND_DECEL * 3 : dir ? GROUND_ACCEL : GROUND_DECEL) * dt);
     b.vy = Math.min(b.vy + GRAVITY * dt, MAX_FALL);
   } else {
     // momentum above AIR_SPEED (dashes, launches) bleeds off slowly while you steer with it

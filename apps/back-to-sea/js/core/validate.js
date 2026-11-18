@@ -224,6 +224,7 @@ export function simulate(env, start, strat, mode = 'jump') {
     if (!b.inWater && b.onGround && leftGround && wasOut) {
       const cell = standCellUnder(env, b);
       if (!cell) return null;
+      if (!landingSafe(env, b) || hazardAhead(env, b, cell)) return null; // landing momentum must not carry the fish into a hazard
       // the next move starts from the cell centre: charge the wriggle to get there
       const recenter = Math.abs(b.x + b.w / 2 - (cell.x + 0.5) * TILE) / K.WRIGGLE_SPEED;
       return { kind: 'stand', x: cell.x, y: cell.y, time: dry + recenter, picks };
@@ -232,6 +233,37 @@ export function simulate(env, start, strat, mode = 'jump') {
   return null;
 }
 const FULL = { x: 0, y: 0, w: TILE, h: TILE };
+
+/** Landing with a hazard on the very next tile in the direction of travel leaves no margin for the slide. */
+const HAZARD_MARGIN = 2;
+function hazardAhead(env, b, cell) {
+  const d = Math.sign(b.vx);
+  if (!d) return false;
+  for (let k = 1; k <= HAZARD_MARGIN; k++) {
+    const nx = cell.x + d * k;
+    if (nx >= 0 && nx < env.w && env.hazard[cell.y * env.w + nx]) return true;
+  }
+  return false;
+}
+
+/** After landing the player keeps holding the direction for a ~0.25 s reaction time, then lets go:
+ *  the fish must not end up in a hazard. */
+function landingSafe(env, b0) {
+  const b = { ...b0 };
+  const dir = Math.sign(b.vx);
+  for (let t = 0; t < 0.9; t += STEP) {
+    stepBody(b, t < 0.25 ? dir : 0, STEP, env);
+    let bad = false;
+    forTilesTouched(b, (tx, ty) => {
+      if (bad || tx < 0 || ty < 0 || tx >= env.w || ty >= env.h) return;
+      const i = ty * env.w + tx;
+      if (env.hazard[i] && overlapsTileBox(b, tx, ty, env.fullHazard[i] ? FULL : K.HAZARD_BOX)) bad = true;
+    });
+    if (bad) return false;
+    if (!b.onGround) break;
+  }
+  return true;
+}
 
 function standCellUnder(env, b) {
   const ty = Math.floor((b.y + b.h - 1) / TILE);

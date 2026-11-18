@@ -14,11 +14,12 @@ export class Camera {
     this.reducedMotion = false;
     this.shakeX = 0; this.shakeY = 0;
     this.t = 0;
+    this.inset = 0;         // px at the bottom of the view covered by touch controls (0 on desktop)
   }
 
   bounds(view, level) {
     const span = (r) => {
-      const minX = r.x, maxX = r.x + r.w - view.w, minY = r.y, maxY = r.y + r.h - view.h;
+      const minX = r.x, maxX = r.x + r.w - view.w, minY = r.y, maxY = r.y + r.h - view.h + this.inset;
       return {
         minX: maxX < minX ? (minX + maxX) / 2 : minX, maxX: maxX < minX ? (minX + maxX) / 2 : maxX,
         minY: maxY < minY ? (minY + maxY) / 2 : minY, maxY: maxY < minY ? (minY + maxY) / 2 : maxY,
@@ -34,7 +35,7 @@ export class Camera {
 
   target(player, view) {
     const want = player.facing * CAM_LOOK_AHEAD + clamp(player.body.vx * 0.25, -40, 40);
-    return { want, tx: player.cx - view.w / 2, ty: player.cy - view.h * 0.55 };
+    return { want, tx: player.cx - view.w / 2, ty: player.cy - (view.h - this.inset) * 0.55 };
   }
 
   snap(player, view, level) {
