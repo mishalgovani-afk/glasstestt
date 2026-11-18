@@ -10,8 +10,27 @@ const solidPx = (w, px, py) => w.solidAtPx(px, py);
 /** Move the player body by (dx, dy) unless that would enter a solid tile (per axis). */
 export function driftBody(world, b, dx, dy) {
   const hit = (x, y) => solidPx(world, x, y) || solidPx(world, x + b.w - 0.01, y) || solidPx(world, x, y + b.h - 0.01) || solidPx(world, x + b.w - 0.01, y + b.h - 0.01);
-  if (dx && !hit(b.x + dx, b.y)) b.x += dx;
-  if (dy && !hit(b.x, b.y + dy)) b.y += dy;
+  // a current never carries you out of the water by itself (the edge of a pipe holds you there)
+  const wet = (x, y) => world.waterAtPx(x + b.w / 2, y + b.h / 2);
+  if (dx && !hit(b.x + dx, b.y) && wet(b.x + dx, b.y)) b.x += dx;
+  if (dy && !hit(b.x, b.y + dy) && wet(b.x, b.y + dy)) b.y += dy;
+}
+
+/** After a dash, landing on dry ground skids to a stop (dash momentum would otherwise carry ~10 tiles). */
+export const SKID_SPEED = 200;
+function installSkid(world) {
+  if (world._skid) return;
+  world._skid = true;
+  world.on('land', () => {
+    const p = world.player;
+    if (p.lastDashT === undefined || world.time - p.lastDashT > 2.5) return;
+    const b = p.body;
+    if (Math.abs(b.vx) > SKID_SPEED) {
+      b.vx = Math.sign(b.vx) * SKID_SPEED;
+      world.particles.dust(p.cx, b.y + b.h, 6);
+      p.lastDashT = undefined;
+    }
+  });
 }
 
 /** Does this player dash from here? Shared by regions and the drum. */
@@ -21,6 +40,8 @@ function doDash(ent, player, world, dir) {
   player.launch(l.vx, l.vy);
   player.body.leapT = l.leapT;
   player.dashUntil = world.time + 0.4;
+  player.lastDashT = world.time;
+  installSkid(world);
   player.strokeCD = DASH_COOLDOWN;
   ent.cool = DASH_COOLDOWN;
   player.facing = dx < 0 ? -1 : dx > 0 ? 1 : player.facing;
@@ -112,11 +133,13 @@ export class Drum extends Entity {
     const p = this.props;
     this.setBox(0, 0, TILE, TILE);
     this.x = (p.cx - p.r) * TILE; this.y = (p.cy - p.r) * TILE; this.w = this.h = p.r * 2 * TILE;
+    this.wide = { ...p, r: p.r + 0.8 };
     this.cool = 0; this.lastTick = -1; this.layer = 1;
     this.socks = [0, 1, 2, 3, 4].map((i) => ({ a: i * 1.26, r: 0.35 + 0.1 * i, c: ['#ff7aa8', '#ffd24d', '#7fd1ae', '#ff9d5c', '#b79bff'][i] }));
   }
   state(world) { return drumState(world.time, this.props); }
-  has(p, world) { return inDrum(this.props, p.cx, p.cy) && world.waterAtPx(p.cx, p.cy); }
+  // a little wider than the circle so the corner cells of the tile-built drum are inside it too
+  has(p, world) { return inDrum(this.wide, p.cx, p.cy) && world.waterAtPx(p.cx, p.cy); }
   update(dt, world) {
     this.time += dt; this.cool = Math.max(0, this.cool - dt);
     const s = this.state(world);

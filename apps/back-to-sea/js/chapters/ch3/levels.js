@@ -46,7 +46,7 @@ function l2() {
   g.set(2, 11, 'S').flow('A', 9, 11, 7, 2, { jet: true });
   // laundry counter: puddles, an iron, drips
   g.rect(24, 8, 15, 6, '#');
-  g.set(26, 7, '-').set(27, 7, '-').set(30, 7, '^').set(28, 6, 'o').set(33, 6, 'o').set(36, 7, 'C');
+  g.set(26, 7, '-').set(27, 7, '-').set(35, 7, '^').set(29, 6, 'o').set(32, 6, 'o').set(37, 7, 'C');
   // the clothesline gap: stepping shelves under wet laundry
   g.put(42, 8, '==').put(46, 6, '==').put(50, 8, '==');
   g.set(43, 4, 'W').prop(43, 4, { period: 1.2 }).set(47, 2, 'W').prop(47, 2, { period: 1.2, color: '#7fd1ae' });
@@ -69,7 +69,7 @@ function l2() {
     decor: [
       { type: 'tub', x: 0, y: 10, w: 17, h: 4, hideTiles: true },
       { type: 'counter', x: 24, y: 8, w: 15, h: 6, hideTiles: true },
-      { type: 'board', x: 30, y: 7, w: 3, h: 1 },
+      { type: 'board', x: 34, y: 7, w: 3, h: 1 },
       { type: 'line', x: 40, y: 3, w: 14, h: 1 },
       { type: 'tub', x: 54, y: 9, w: 15, h: 5, hideTiles: true },
       { type: 'pipe', x: 69, y: 9, w: 7, h: 4, hideTiles: true },
@@ -116,36 +116,35 @@ function l3() {
 
 // ------------------------------------------------------------------------------------------ 3-4
 function l4() {
-  const g = new Grid(72, 17).floor();
+  const g = new Grid(66, 17).floor();
   // feeder pipe into the washing machine (cabinet x14..27)
   g.rect(2, 7, 12, 4, '#').rect(3, 8, 11, 2, '~');
   g.rect(14, 2, 14, 13, '#');
   g.drum(22, 9, 4, 0);
   g.rect(14, 8, 4, 2, '~').flow('R', 3, 8, 15, 2);   // inlet pipe through the cabinet
   g.set(4, 8, 'S').set(22, 9, 'M').prop(22, 9, { cx: 22, cy: 9, r: 4, step: 1 });
-  g.rect(26, 7, 2, 3, '.');                            // the porthole door out of the drum
+  g.rect(26, 6, 2, 4, '.').set(25, 6, '.');            // the porthole door out of the drum (upper right)
   // counter with an iron and drips
-  g.rect(33, 11, 15, 4, '#');
-  g.set(36, 10, '-').set(37, 10, '-').set(40, 10, '^').set(38, 9, 'o').set(43, 9, 'o').set(45, 10, 'C');
-  g.set(42, 6, 'W').prop(42, 6, { period: 1.2 });
-  g.put(49, 10, '==');
+  g.rect(33, 9, 15, 6, '#');
+  g.set(35, 8, '-').set(36, 8, '-').set(44, 8, '^').set(39, 7, 'o').set(41, 7, 'o').set(46, 8, 'C');
+  g.set(40, 4, 'W').prop(40, 4, { period: 1.2 });
   // bucket with the drain
-  g.rect(54, 9, 10, 6, '#').rect(55, 9, 8, 5, '~').set(60, 12, 'E');
-  vents(g, 28, 32); vents(g, 48, 53);
+  g.rect(51, 9, 11, 6, '#').rect(52, 9, 9, 5, '~').set(57, 12, 'E');
+  vents(g, 28, 32); vents(g, 48, 50);
   return done(g, {
     id: '3-4', name: 'Spin Cycle', budget: 75,
     hint: 'The drum spins its current round. JUMP when the arrow points the way out!',
     says: [
       { x: 19, y: 9, text: 'The arrow shows where a dash would go. Aim for the porthole!', seconds: 5 },
-      { x: 35, text: 'Puddles and drips keep you wet. Hop the iron.', seconds: 3.5 },
+      { x: 34, text: 'Puddles and drips keep you wet. Hop the iron.', seconds: 3.5 },
     ],
     decor: [
       { type: 'pipe', x: 2, y: 7, w: 12, h: 4, hideTiles: true },
-      { type: 'washer', x: 14, y: 2, w: 14, h: 13, hideTiles: true, cx: 22, cy: 9, r: 4, door: { x: 26, y: 7, w: 2, h: 3 } },
-      { type: 'counter', x: 33, y: 11, w: 15, h: 4, hideTiles: true },
-      { type: 'board', x: 39, y: 10, w: 3, h: 1 },
-      { type: 'line', x: 39, y: 5, w: 6, h: 1 },
-      { type: 'bucket', x: 54, y: 9, w: 10, h: 6, hideTiles: true },
+      { type: 'washer', x: 14, y: 2, w: 14, h: 13, hideTiles: true, cx: 22, cy: 9, r: 4, door: { x: 25, y: 6, w: 3, h: 4 } },
+      { type: 'counter', x: 33, y: 9, w: 15, h: 6, hideTiles: true },
+      { type: 'board', x: 43, y: 8, w: 3, h: 1 },
+      { type: 'line', x: 39, y: 3, w: 6, h: 1 },
+      { type: 'bucket', x: 51, y: 9, w: 11, h: 6, hideTiles: true },
     ],
   });
 }
@@ -165,7 +164,7 @@ function l5() {
   g.set(33, 8, 'M').prop(33, 8, { cx: 33, cy: 8, r: 4, step: 0.9, ccw: true });
   // counter B
   g.rect(44, 11, 14, 4, '#');
-  g.set(46, 10, '-').set(47, 10, '-').set(50, 10, '^').set(52, 9, 'o').set(55, 10, 'C');
+  g.set(46, 10, '-').set(47, 10, '-').set(53, 10, '^').set(50, 9, 'o').set(56, 10, 'C');
   g.set(49, 6, 'W').prop(49, 6, { period: 1.2 });
   // washer B (clockwise): porthole in on the left, out up on the right
   g.rect(58, 2, 15, 13, '#');
@@ -188,7 +187,7 @@ function l5() {
       { type: 'counter', x: 18, y: 9, w: 8, h: 6, hideTiles: true },
       { type: 'washer', x: 26, y: 2, w: 13, h: 13, hideTiles: true, cx: 33, cy: 8, r: 4, door: { x: 37, y: 7, w: 2, h: 2 }, door2: { x: 26, y: 7, w: 3, h: 2 } },
       { type: 'counter', x: 44, y: 11, w: 14, h: 4, hideTiles: true },
-      { type: 'board', x: 49, y: 10, w: 3, h: 1 },
+      { type: 'board', x: 52, y: 10, w: 3, h: 1 },
       { type: 'washer', x: 58, y: 2, w: 15, h: 13, hideTiles: true, cx: 66, cy: 8, r: 4, door: { x: 70, y: 6, w: 3, h: 3 }, door2: { x: 58, y: 9, w: 4, h: 2 } },
       { type: 'counter', x: 78, y: 10, w: 14, h: 4, hideTiles: true },
     ],
@@ -204,34 +203,34 @@ function l6() {
   g.set(3, 4, 'S').set(8, 6, 'C');
   // counter: puddles, iron, wet laundry
   g.rect(25, 8, 12, 7, '#');
-  g.set(27, 7, '-').set(28, 7, '-').set(32, 7, '^').set(30, 6, 'o').set(35, 6, 'o').set(35, 7, 'C');
-  g.set(33, 3, 'W').prop(33, 3, { period: 1.2 });
+  g.set(27, 7, '-').set(28, 7, '-').set(35, 7, '^').set(30, 6, 'o').set(33, 6, 'o').set(36, 7, 'C');
+  g.set(31, 3, 'W').prop(31, 3, { period: 1.2 });
   // washer: counter-clockwise and quick
   g.rect(40, 1, 15, 14, '#');
   g.drum(48, 7, 4, 0);
   g.rect(40, 6, 4, 2, '.');
-  g.rect(52, 8, 3, 2, '.');
-  g.set(48, 7, 'M').prop(48, 7, { cx: 48, cy: 7, r: 4, step: 0.75, ccw: true });
+  g.rect(52, 7, 3, 2, '.');
+  g.set(48, 7, 'M').prop(48, 7, { cx: 48, cy: 7, r: 4, step: 0.9, ccw: true });
   // the draining basin: flows funnel toward the floor drain
-  g.rect(62, 11, 22, 3, '#').rect(63, 11, 20, 3, '~');
-  g.flow('Y', 63, 12, 9, 2).flow('D', 72, 12, 1, 2).flow('Z', 73, 12, 9, 2);
-  g.set(72, 13, 'E');
-  vents(g, 19, 24); vents(g, 37, 39); vents(g, 55, 61);
+  g.rect(60, 11, 24, 3, '#').rect(61, 11, 22, 3, '~');
+  g.flow('Y', 61, 12, 10, 2).flow('D', 71, 12, 1, 2).flow('Z', 72, 12, 10, 2);
+  g.set(71, 13, 'E');
+  vents(g, 19, 24); vents(g, 37, 39); vents(g, 55, 59);
   return done(g, {
     id: '3-6', name: 'Down the Drain', budget: 75,
     hint: 'Pipe, counter, washer. Then the floor drain!',
     says: [
-      { x: 41, y: 7, text: 'Fast spin. Dash out of the lower porthole to reach the basin.', seconds: 4.5 },
-      { x: 64, y: 12, text: 'The basin drains toward the floor drain. Let it pull you in!', seconds: 4.5 },
+      { x: 41, y: 7, text: 'It spins the other way. Get next to the porthole, then dash!', seconds: 4.5 },
+      { x: 62, y: 12, text: 'The basin drains toward the floor drain. Let it pull you in!', seconds: 4.5 },
     ],
     decor: [
       { type: 'tub', x: 1, y: 3, w: 11, h: 6, hideTiles: true },
       { type: 'pipe', x: 12, y: 4, w: 7, h: 4, hideTiles: true },
       { type: 'counter', x: 25, y: 8, w: 12, h: 7, hideTiles: true },
-      { type: 'board', x: 31, y: 7, w: 3, h: 1 },
-      { type: 'line', x: 31, y: 2, w: 6, h: 1 },
-      { type: 'washer', x: 40, y: 1, w: 15, h: 14, hideTiles: true, cx: 48, cy: 7, r: 4, door: { x: 52, y: 8, w: 3, h: 2 }, door2: { x: 40, y: 6, w: 4, h: 2 } },
-      { type: 'basin', x: 62, y: 11, w: 22, h: 3, hideTiles: true },
+      { type: 'board', x: 34, y: 7, w: 3, h: 1 },
+      { type: 'line', x: 28, y: 2, w: 6, h: 1 },
+      { type: 'washer', x: 40, y: 1, w: 15, h: 14, hideTiles: true, cx: 48, cy: 7, r: 4, door: { x: 52, y: 7, w: 3, h: 2 }, door2: { x: 40, y: 6, w: 4, h: 2 } },
+      { type: 'basin', x: 60, y: 11, w: 24, h: 3, hideTiles: true },
     ],
   });
 }
