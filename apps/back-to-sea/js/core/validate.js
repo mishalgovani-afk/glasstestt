@@ -224,7 +224,8 @@ export function simulate(env, start, strat, mode = 'jump') {
     if (!b.inWater && b.onGround && leftGround && wasOut) {
       const cell = standCellUnder(env, b);
       if (!cell) return null;
-      if (!landingSafe(env, b) || hazardAhead(env, b, cell)) return null; // landing momentum must not carry the fish into a hazard
+      if (!landingSafe(env, b)) return null;
+      if (hazardAhead(env, b, cell)) return null; // landing momentum must not carry the fish into a hazard
       // the next move starts from the cell centre: charge the wriggle to get there
       const recenter = Math.abs(b.x + b.w / 2 - (cell.x + 0.5) * TILE) / K.WRIGGLE_SPEED;
       return { kind: 'stand', x: cell.x, y: cell.y, time: dry + recenter, picks };
