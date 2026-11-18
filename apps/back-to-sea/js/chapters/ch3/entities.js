@@ -64,6 +64,7 @@ export class Current extends Entity {
     const ang = Math.atan2(vy, vx);
     ctx.save();
     ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fillRect(x, y, w, h);
     ctx.translate(x + w / 2, y + h / 2); ctx.rotate(ang);
     const L = Math.hypot(w, h) + 40;
     const laneGap = 22, along = 38, sp = 70 + this.speed * 0.5;

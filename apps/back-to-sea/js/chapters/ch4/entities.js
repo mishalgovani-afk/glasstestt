@@ -83,6 +83,11 @@ export class Valve extends Entity {
   get on() { return this.plumb.isOn(this.ids[0]); }
   onJump(player, world) {
     if (this.cool > 0) return false;           // never eat stroke presses while cooling down
+    // Holding ANY direction means "hop/swim on": otherwise waiting at the wheel and then hopping
+    // away would turn it straight back. Stand still and JUMP to turn it.
+    const inp = world.game && world.game.input;
+    const dir = inp && inp.dir ? inp.dir() : 0;
+    if (dir !== 0) return false;
     this.cool = 0.5; this.used = true; this.shake = 1;
     const next = !this.on;
     for (const id of this.ids) this.plumb.set(id, next, next ? this.dur : 0);

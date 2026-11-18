@@ -37,7 +37,7 @@ function level41() {
   g.put(58, 14, 'E');
   return {
     id: '4-1', name: 'Down the Drain', budget: 55,
-    hint: 'Valve wheels turn when you JUMP while touching them.',
+    hint: 'Stand still at a valve wheel and JUMP to turn it.',
     map: g.rows(),
     props: {
       '19,14': { link: 'a', pipe: [[19, 13], [19, 3], [25, 3]], opens: [{ x: 28, y: 5, t: 2.6, with: ['a'] }] },
@@ -45,7 +45,7 @@ function level41() {
     },
     decor: [],
     says: [
-      { x: 10, text: 'A valve wheel! Stand at it and JUMP to turn it.' },
+      { x: 10, text: 'A valve wheel! Stop in front of it and JUMP to turn it.' },
       { x: 21, text: 'Water rising? Swim up and leap out the top!' },
     ],
   };
@@ -69,7 +69,7 @@ function level42() {
   g.fill(3, 13, 6, 14, '~'); g.put(4, 14, 'S');  // starting pool (a puddle off the drain)
   g.put(9, 10, 'o');
   g.put(12, 12, 'Y');                            // steam vent
-  g.fill(15, 7, 19, 8, '#'); g.put(17, 9, 'D');  // overhang + dripping pipe
+  g.fill(17, 7, 19, 8, '#'); g.put(19, 9, 'D');  // overhang + dripping pipe (drips on the valve)
   g.put(20, 12, 'V');
   g.fill(22, 13, 35, 15, '.'); g.fill(22, 16, 35, 16, '^'); // the hot-pipe trench
   g.put(21, 15, 'T');
@@ -89,7 +89,7 @@ function level42() {
     map: g.rows(),
     props: {
       '20,12': { link: 'a', timer: 22, pipe: [[20, 11], [20, 3], [28, 3]], opens: [{ x: 37, y: 12, t: 2.4, with: ['a'] }] },
-      '21,15': { id: 'a', x0: 22, x1: 35, off: 16, on: 13, floor: 15, rise: 2.2, fall: 1.4, inlet: [28, 2] },
+      '21,15': { id: 'a', x0: 22, x1: 35, off: 16, on: 12, floor: 15, rise: 2.2, fall: 1.4, inlet: [28, 2] },
       '52,12': { link: 'b', timer: 20, pipe: [[52, 11], [52, 7], [57, 7]], opens: [{ x: 61, y: 12, t: 2.6, with: ['b'], dry: true }] },
       '58,9': { id: 'b', w: 2, h: 4 },
       '12,12': { rows: 2, period: 4.6, offset: 1 },
@@ -97,6 +97,7 @@ function level42() {
     says: [
       { x: 5, text: 'Steam vents jet on a rhythm. Time your hop!' },
       { x: 18, text: 'The wheel is on a timer: it drifts back!', seconds: 4 },
+      { x: 22, y: 12, text: 'Keep stroking (JUMP) to stay off the hot pipes!', seconds: 4 },
       { x: 50, text: 'This one lifts the steel gate. Hurry through.' },
     ],
   };
@@ -114,7 +115,7 @@ function level43() {
   g.fill(14, 22, 19, 23, '~');
   g.put(13, 15, 'T');
   g.fill(20, 14, 43, 23, '#');                   // right mass, ledge L1 top row 14 (stand row 13) for x20..25
-  g.put(22, 13, 'Y');
+  g.put(21, 13, 'C'); g.put(22, 13, 'Y');
   g.put(24, 13, 'V');
   // shaft 2: interior x26..30, bottom row 13
   g.fill(26, 12, 30, 13, '~');
@@ -233,7 +234,7 @@ function level45() {
       '26,12': { link: 'a', timer: 20, pipe: [[26, 11], [26, 5], [30, 5]], opens: [{ x: 33, y: 12, t: 2.4, with: ['a'], dry: true }] },
       '31,8': { id: 'a', w: 2, h: 5 },
       '38,12': { link: 'b', timer: 26, pipe: [[38, 11], [38, 3], [50, 3], [50, 4]], opens: [{ x: 64, y: 12, t: 3.4, with: ['b'] }] },
-      '63,14': { id: 'b', x0: 40, x1: 62, off: 16, on: 13, floor: 15, rise: 1.6, fall: 1.0, inlet: [45, 2] },
+      '63,14': { id: 'b', x0: 40, x1: 62, off: 16, on: 12, floor: 15, rise: 1.6, fall: 1.0, inlet: [45, 2] },
       '51,7': { period: 1.3 },
       '72,12': { link: 'c', pipe: [[72, 11], [72, 3], [82, 3]], opens: [{ x: 87, y: 3, t: 2.6, with: ['c'] }] },
       '86,9': { id: 'c', x0: 80, x1: 85, off: 11, on: 5, floor: 12, rise: 1.8, fall: 2.5, inlet: [82, 2] },

@@ -18,9 +18,9 @@ function l1() {
   g.set(24, 9, 'C');
   g.flow('A', 31, 8, 6, 2, { jet: true });
   // counter with the floor drain
-  g.rect(45, 5, 11, 8, '#').set(53, 4, 'E');
+  g.rect(44, 5, 12, 8, '#').set(53, 4, 'E');
   g.set(48, 4, 'o');
-  vents(g, 15, 20); vents(g, 39, 44);
+  vents(g, 15, 20); vents(g, 39, 43);
   return done(g, {
     id: '3-1', name: 'Down the Pipe', budget: 50,
     hint: 'Currents push you along. JUMP inside one to DASH!',
@@ -31,8 +31,7 @@ function l1() {
     decor: [
       { type: 'pipe', x: 0, y: 2, w: 15, h: 4, hideTiles: true },
       { type: 'tub', x: 21, y: 7, w: 18, h: 6, hideTiles: true },
-      { type: 'counter', x: 45, y: 5, w: 11, h: 8, hideTiles: true },
-      { type: 'hamper', x: 18, y: 10, w: 2, h: 2 },
+      { type: 'counter', x: 44, y: 5, w: 12, h: 8, hideTiles: true },
     ],
   });
 }
@@ -84,28 +83,28 @@ function l3() {
   const g = new Grid(80, 16).floor();
   // bucket brigade: three buckets rising, each with a jet
   g.rect(1, 10, 10, 4, '#').rect(2, 10, 8, 3, '~').set(3, 11, 'S').flow('A', 6, 11, 4, 2, { jet: true });
-  g.rect(17, 7, 10, 7, '#').rect(18, 7, 8, 5, '~').flow('A', 21, 8, 4, 2, { jet: true }).set(19, 9, 'C');
-  g.rect(33, 4, 10, 10, '#').rect(34, 4, 8, 8, '~').flow('A', 37, 5, 4, 2, { jet: true });
+  g.rect(15, 7, 10, 7, '#').rect(16, 7, 8, 5, '~').flow('A', 19, 8, 4, 2, { jet: true }).set(17, 9, 'C');
+  g.rect(29, 4, 10, 10, '#').rect(30, 4, 8, 8, '~').flow('A', 33, 5, 5, 2, { jet: true });
   // top shelf gauntlet
-  g.rect(48, 4, 16, 10, '#');
+  g.rect(44, 4, 20, 10, '#');
   g.set(53, 2, 'W').prop(53, 2, { period: 1.2 }).set(56, 3, '^').set(58, 3, 'o').set(60, 3, 'C');
   g.set(61, 0, 'W').prop(61, 0, { period: 1.3, color: '#7fd1ae' });
   g.set(54, 3, '-').set(55, 3, '-');
   // down to the sink drain via a hose pipe
   g.put(66, 5, '==').put(70, 7, '==');
   g.rect(73, 9, 7, 5, '#').rect(74, 9, 5, 4, '~').set(77, 12, 'E');
-  vents(g, 11, 16); vents(g, 27, 32); vents(g, 43, 47);
+  vents(g, 11, 14); vents(g, 25, 28); vents(g, 39, 43);
   return done(g, {
     id: '3-3', name: 'Bucket Brigade', budget: 70,
     hint: 'Dash from jet to jet. Each bucket is higher than the last!',
     says: [
-      { x: 44, text: 'Drips refill you up here. Mind the iron!', seconds: 3.5 },
+      { x: 47, text: 'Drips refill you up here. Mind the iron!', seconds: 3.5 },
     ],
     decor: [
       { type: 'bucket', x: 1, y: 10, w: 10, h: 4, hideTiles: true },
-      { type: 'bucket', x: 17, y: 7, w: 10, h: 7, hideTiles: true },
-      { type: 'bucket', x: 33, y: 4, w: 10, h: 10, hideTiles: true },
-      { type: 'counter', x: 48, y: 4, w: 16, h: 10, hideTiles: true },
+      { type: 'bucket', x: 15, y: 7, w: 10, h: 7, hideTiles: true },
+      { type: 'bucket', x: 29, y: 4, w: 10, h: 10, hideTiles: true },
+      { type: 'counter', x: 44, y: 4, w: 20, h: 10, hideTiles: true },
       { type: 'board', x: 56, y: 3, w: 3, h: 1 },
       { type: 'line', x: 51, y: 0, w: 12, h: 1 },
       { type: 'tub', x: 73, y: 9, w: 7, h: 5, hideTiles: true },

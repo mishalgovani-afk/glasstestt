@@ -1,59 +1,43 @@
-// Chapter 3 — The Laundry Room (STUB by the core engine; the chapter-3 agent replaces this).
-// Mechanic to build: currents & spin. See ch1-kitchen.js for the reference patterns.
-import { grad, cached, ctxScale, roundRect, blit } from '../core/draw.js';
-
-const P = {
-  sky: '#eee8f7', wallA: '#e9e3f4', wallB: '#cfc4e6', solid: '#9b8fbf', solidEdge: '#d9d1f0',
-  water: '#8fc9f0', waterDeep: '#3d68a8', accent: '#ffcc4d', shelf: '#b8a98a', hazard: '#ff6b6b',
-};
-
-function paintWall(c, w, h) {
-  c.fillStyle = grad(c, 0, 0, 0, h, [P.wallA, P.wallB]);
-  c.fillRect(0, 0, w, h);
-  // washing machine silhouette
-  c.fillStyle = '#f7f6fb'; roundRect(c, 120, 120, 150, 170, 12); c.fill();
-  c.fillStyle = '#c9c3dc'; c.beginPath(); c.arc(195, 215, 52, 0, 7); c.fill();
-  c.fillStyle = '#9fc6e8'; c.beginPath(); c.arc(195, 215, 40, 0, 7); c.fill();
-  c.fillStyle = 'rgba(255,255,255,.4)'; c.beginPath(); c.arc(180, 200, 14, 0, 7); c.fill();
-}
+// Chapter 3 — The Laundry Room: Currents & spin.
+//
+// Mechanic: patches of water carry a current (animated chevrons, drift ~80 px/s, always swimmable
+// upstream). JUMP inside a current is a DASH along its flow: a fast burst that can shoot you out of
+// the water across a gap. The washing-machine drum's current ROTATES through 8 directions (one per
+// second, arrow on the hub): time your jump.
+//
+// Honest reach rules (ch3/reach.js): every non-surface water cell of a current gets a simulated
+// dash launch, built from the same dashLaunch() the game uses. Currents never cover surface cells,
+// so the plain leap stays available at the top of every pool, and no current is ever stronger
+// than your swim speed, so swimming upstream always works.
+import { ENTITIES } from './ch3/entities.js';
+import { reach } from './ch3/reach.js';
+import { levels } from './ch3/levels.js';
+import { P, drawBackground, drawSolidTile, drawHazard, drawDecor } from './ch3/art.js';
 
 export default {
   id: 'laundry', number: 3,
   title: 'The Laundry Room', subtitle: 'Round and round',
-  mechanic: { name: 'Currents & spin', hint: 'Currents push you — JUMP inside one to dash along the flow.' },
+  mechanic: { name: 'Currents & spin', hint: 'Currents push you. JUMP inside one to dash along the flow.' },
   palette: P,
-  drawBackground(ctx, view, cam) {
-    const img = cached('l-wall', 480, 360, ctxScale(ctx), paintWall);
-    const off = -((cam.x * 0.3) % 480 + 480) % 480;
-    for (let x = Math.floor(off); x < view.w; x += 480) blit(ctx, img, x, -cam.y * 0.2);
+  drawBackground, drawSolidTile, drawHazard, drawDecor,
+  entities: ENTITIES,
+  reach,
+  sfx: {
+    dash: (a, o) => {
+      a.noise({ dur: 0.22, vol: 0.22 * (o.vol ?? 1), filter: 'bandpass', freq: 600, to: 2600, q: 1.2, attack: 0.01 });
+      a.tone({ freq: 260, to: 720, dur: 0.16, type: 'triangle', vol: 0.18 * (o.vol ?? 1), attack: 0.005 });
+    },
+    tick: (a, o) => a.tone({ freq: 880, to: 700, dur: 0.05, type: 'square', vol: 0.05 * (o.vol ?? 1), attack: 0.002 }),
+    plink: (a, o) => a.tone({ freq: 1500 * (o.pitch || 1), to: 900 * (o.pitch || 1), dur: 0.12, type: 'sine', vol: 0.3 * (o.vol ?? 1), attack: 0.002 }),
   },
-  entities: {},
   music: {
-    bpm: 96, key: 'D', scale: 'dorian', progression: [1, 4, 1, 7], swing: 0.18, reverb: 0.3,
+    bpm: 100, key: 'D', scale: 'dorian', progression: [1, 4, 1, 7], swing: 0.18, reverb: 0.32,
     pad: { wave: 'triangle', vol: 0.4, octave: 3, cutoff: 1200, attack: 0.8 },
     bass: { wave: 'triangle', vol: 0.5, octave: 2, pattern: 'x..x..x.' },
     arp: { wave: 'sine', vol: 0.28, octave: 4, pattern: [0, 1, 2, 1, 0, 2], rate: 3, decay: 0.25 },
+    lead: { wave: 'triangle', vol: 0.14, octave: 5, density: 0.2, decay: 0.7 },
+    drips: { vol: 0.22, density: 0.2 },
+    noise: { vol: 0.05, cutoff: 500 },
   },
-  levels: [
-    {
-      id: '3-1', name: 'Spin Cycle', budget: 40,
-      map: [
-        '..............................',
-        '..............................',
-        '..............................',
-        '..............................',
-        '..............................',
-        '..............................',
-        '..............................',
-        '..............................',
-        '..............................',
-        '..............................',
-        '..............................',
-        '..S.......-......###..........',
-        '......###........###......E...',
-        '##############################',
-        '##############################',
-      ],
-    },
-  ],
+  levels,
 };

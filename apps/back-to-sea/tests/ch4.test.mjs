@@ -112,6 +112,15 @@ for (const level of chapter.levels) {
     }
   });
 
+  test(`${level.id}: claims that fill an empty hot bed allow time for the water to rise`, () => {
+    for (const v of valves) for (const o of v.props.opens || []) {
+      for (const id of v.props.links || [v.props.link]) for (const t of tanks.filter((q) => q.props.id === id && q.props.off === q.props.floor + 1)) {
+        const need = (t.props.off - (t.props.floor - 1)) / (t.props.rise || 2.8) + 0.8;
+        assert.ok(o.t >= need - 1e-9, `claim ${v.tx},${v.ty} t=${o.t} < ${need.toFixed(2)} (water must reach 2 rows deep)`);
+      }
+    }
+  });
+
   test(`${level.id}: valves matter (the level fails without their edges)`, () => {
     const r = validateLevel(level, chapterNoV);
     assert.equal(r.ok, false, 'level is beatable without any valve: the valves are decoration');
