@@ -427,6 +427,10 @@ export default {
   sfx: {
     // chapter SFX receive the synth helper `a` (see js/core/audio.js "Synth helper")
     plink: (a, o) => a.tone({ freq: 1500 * (o.pitch || 1), to: 900 * (o.pitch || 1), dur: 0.12, type: 'sine', vol: 0.3 * (o.vol ?? 1), attack: 0.002 }),
+    // kettle steam boost: a rising airy whoosh
+    whoosh: (a, o) => { a.noise({ dur: 0.55, vol: 0.2 * (o.vol ?? 1), filter: 'bandpass', freq: 500, to: 2600, q: 0.9, pan: o.pan }); a.tone({ freq: 380, to: 900, dur: 0.3, type: 'sine', vol: 0.07 * (o.vol ?? 1), pan: o.pan }); },
+    // sponge squeeze: a wet squelch
+    squish: (a, o) => { a.tone({ freq: 220 * (o.pitch || 1), to: 90 * (o.pitch || 1), dur: 0.14, type: 'sine', vol: 0.2 * (o.vol ?? 1), pan: o.pan }); a.noise({ dur: 0.18, vol: 0.14 * (o.vol ?? 1), filter: 'bandpass', freq: 900, to: 400, q: 1.2, pan: o.pan }); },
     sizzle: (a, o) => a.noise({ dur: 0.35, vol: 0.18 * (o.vol ?? 1), filter: 'highpass', freq: 3000 }),
   },
   music: {

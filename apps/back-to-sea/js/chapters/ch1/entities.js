@@ -130,7 +130,7 @@ export class Tap extends Entity {
 class SteamColumn extends Entity {
   wet = true;
   jumpPriority = 20;
-  layer = 1;
+  layer = -1;   // behind the fish so the steam never hides it
   init(world) {
     const k = this.props.kettle;
     this.kettle = k;
@@ -156,10 +156,12 @@ class SteamColumn extends Entity {
   draw(ctx) {
     const t = this.kettle.time, x = this.x, w = this.w, bottom = this.y + this.h;
     // faint column so the fish can read how far the steam reaches
-    ctx.fillStyle = grad(ctx, 0, this.y, 0, bottom, ['rgba(255,255,255,0)', 'rgba(255,255,255,.12)', 'rgba(255,255,255,.2)']);
-    ctx.fillRect(x + 2, this.y, w - 4, this.h);
+    ctx.fillStyle = grad(ctx, 0, this.y, 0, bottom, ['rgba(150,205,235,0)', 'rgba(150,205,235,.16)', 'rgba(130,195,235,.3)']);
+    ctx.fillRect(x + 1, this.y, w - 2, this.h);
+    ctx.fillStyle = 'rgba(120,185,225,.35)';
+    ctx.fillRect(x + 1, this.y + 8, 1, this.h - 8); ctx.fillRect(x + w - 2, this.y + 8, 1, this.h - 8);
     const puff = cached('k-puff', 40, 40, ctxScale(ctx), (c) => {
-      c.fillStyle = radial(c, 20, 20, 0, 20, ['rgba(255,255,255,.95)', 'rgba(255,255,255,.4)', 'rgba(255,255,255,0)']);
+      c.fillStyle = radial(c, 20, 20, 0, 20, ['rgba(255,255,255,1)', 'rgba(215,236,248,.75)', 'rgba(170,210,236,0)']);
       c.fillRect(0, 0, 40, 40);
     });
     const N = Math.min(14, 4 + this.kettle.rows);
@@ -168,7 +170,7 @@ class SteamColumn extends Entity {
       const px = this.kettle.cx + Math.sin(t * 2 + i * 2.1 + this.seed) * (3 + 6 * k);
       const py = bottom - 4 - k * (this.h - 4);
       const r = 7 + 12 * k;
-      ctx.globalAlpha = 0.5 * Math.sin(Math.PI * Math.min(1, k * 1.1)) + 0.04;
+      ctx.globalAlpha = 0.8 * Math.sin(Math.PI * Math.min(1, k * 1.1)) + 0.04;
       ctx.drawImage(puff, px - r, py - r, r * 2, r * 2);
     }
     ctx.globalAlpha = 1;
