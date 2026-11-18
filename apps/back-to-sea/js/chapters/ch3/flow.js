@@ -4,8 +4,8 @@
 import { TILE, LEAP_BALLISTIC } from '../../core/constants.js';
 
 /** Dash tuning. */
-export const DASH_SPEED = 700;      // px/s along the flow
-export const DASH_UP = 1.15;        // upward dashes are a bit stronger (they fight gravity)
+export const DASH_SPEED = 820;      // px/s along the flow
+export const DASH_UP = 1.4;        // upward dashes are a bit stronger (they fight gravity)
 export const DASH_LIFT = 120;       // a mostly-horizontal dash leaves with this much upward speed
 export const DASH_T = LEAP_BALLISTIC; // seconds of ballistic flight (same as a leap)
 export const DASH_COOLDOWN = 0.32;  // s between dashes
