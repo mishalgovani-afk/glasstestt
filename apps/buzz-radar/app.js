@@ -89,7 +89,7 @@ function readLast() {
 const state = {
   game: "", days: 30, demo: false,
   posts: [], postsById: new Map(), report: null, ranked: [], rankOf: new Map(),
-  selected: null, runId: 0, ctrl: null, loading: false,
+  selected: null, publisher: "", runId: 0, ctrl: null, loading: false,
   keys: loadKeys(),
   chips: {},          // sourceId -> {status, count, error}
   chart: null,
@@ -370,9 +370,36 @@ function renderResults() {
       ? el("div", { class: "clusters" }, state.ranked.map((c) => clusterCard(c)))
       : el("div", { class: "card state" }, el("p", { text: "No distinct clusters stood out. The chatter looks like steady background activity." }))));
 
+  const ads = adLibraryPanel();
+  if (ads) out.push(ads);
+
   $("#results").replaceChildren(...out);
   $("#results").classList.remove("stale");
   state.chart?.draw();
+}
+
+/* ------------------------------------------------------------------ ad libraries */
+function adLibraryPanel() {
+  if (typeof SRC.adLibraryLinks !== "function") return null;
+  const list = el("ul", { class: "adlinks" });
+  const fill = () => {
+    let links = [];
+    try { links = SRC.adLibraryLinks(state.game, state.publisher || undefined) || []; } catch { links = []; }
+    list.replaceChildren(...links.map((l) => {
+      const href = safeHref(l.url);
+      return el("li", {},
+        href ? extLink(l.url, `${l.name} ↗`, { class: "adlink" }) : el("span", { class: "adlink", text: l.name }),
+        l.note ? el("span", { class: "adnote", text: l.note }) : null);
+    }));
+  };
+  const input = el("input", { type: "text", id: "publisherInput", placeholder: "e.g. the studio or publisher", autocomplete: "off", maxlength: "80", value: state.publisher || "" });
+  input.addEventListener("input", () => { state.publisher = input.value.trim(); fill(); });
+  fill();
+  return el("section", { class: "card ads", "aria-labelledby": "adsH" },
+    el("h2", { class: "sec", id: "adsH", text: "Ad libraries: see the actual paid ads" }),
+    el("p", { class: "sec-note", text: "Social posts only hint at paid pushes. Ad libraries show the real ads a publisher is running, with start dates. Open each one, then compare the ad start dates with the cluster dates on the timeline above. A new batch of ads starting just before a burst is strong evidence of a bought campaign." }),
+    el("div", { class: "field" }, el("label", { for: "publisherInput", text: "Publisher or studio name (optional)" }), input),
+    list);
 }
 
 function stat(value, label) {
@@ -778,24 +805,42 @@ function renderSettings() {
   const wasOpen = host.childElementCount > 0;
   const status = el("p", { class: "status", role: "status", "aria-live": "polite", id: "setStatus" });
   const reveal = el("input", { type: "checkbox", id: "revealKeys" });
+  const fieldRow = (owner, f) => {
+    const k = state.keys[owner] || {};
+    const id = `key-${owner}-${f.name}`;
+    const secret = /key|secret|token|password/i.test(f.name);
+    return el("div", { class: "set-f" },
+      el("label", { for: id }, f.label || f.name, f.optional && !/optional/i.test(f.label || "") ? el("span", { class: "opt", text: " (optional)" }) : null),
+      el("input", { id, type: secret ? "password" : "text", "data-src": owner, "data-field": f.name, value: k[f.name] || "", autocomplete: "off", spellcheck: "false", autocapitalize: "off", "data-secret": secret ? "1" : null }),
+      el("p", { class: "help" }, f.help ? `${f.help} ` : "", f.url ? extLink(f.url, "Get one ↗") : null));
+  };
+  const groupCard = ([gid, g]) => {
+    const users = SOURCES.filter((s) => s.keyGroup === gid).map((s) => s.name);
+    let cost = null;
+    try { const c = SRC.estimateApifyCostUSD?.(150); if (gid === "apify" && Number.isFinite(c)) cost = c; } catch { /* ignore */ }
+    const costText = cost == null ? null : `≈ ${cost < 0.01 ? "<$0.01" : "$" + cost.toFixed(2)} per search, free plan includes $5/month.`;
+    return el("section", { class: "card set-src" },
+      el("fieldset", {},
+        el("legend", { text: `${g.name || gid} (one key for ${users.length ? users.join(", ") : "several platforms"})` }),
+        el("p", { class: "sec-note", text: `Shared by ${users.join(", ") || "several sources"}. Enter it once here.` }),
+        (g.keyFields || []).map((f) => fieldRow(gid, f)),
+        costText ? el("p", { class: "cost", text: costText }) : null));
+  };
+  const sourceCard = (s) => {
+    const fields = s.keyFields || [];
+    return el("section", { class: "card set-src" },
+      el("fieldset", {},
+        el("legend", { text: s.name }),
+        !fields.length ? el("p", { class: "sec-note", text: "No key needed. This source works out of the box." }) : null,
+        s.needsKey ? null : fields.length ? el("p", { class: "sec-note", text: "Works without a key; adding one is optional and improves results." }) : null,
+        fields.map((f) => fieldRow(s.id, f))));
+  };
+  const groups = Object.entries(KEY_GROUPS);
   const form = el("form", { autocomplete: "off" },
-    SOURCES.map((s) => {
-      const fields = s.keyFields || [];
-      const k = state.keys[s.id] || {};
-      return el("section", { class: "card set-src" },
-        el("fieldset", {},
-          el("legend", { text: s.name }),
-          !fields.length ? el("p", { class: "sec-note", text: "No key needed. This source works out of the box." }) : null,
-          s.needsKey ? null : fields.length ? el("p", { class: "sec-note", text: "Works without a key; adding one is optional and improves results." }) : null,
-          fields.map((f) => {
-            const id = `key-${s.id}-${f.name}`;
-            const secret = /key|secret|token|password/i.test(f.name);
-            return el("div", { class: "set-f" },
-              el("label", { for: id }, f.label || f.name, f.optional && !/optional/i.test(f.label || "") ? el("span", { class: "opt", text: " (optional)" }) : null),
-              el("input", { id, type: secret ? "password" : "text", "data-src": s.id, "data-field": f.name, value: k[f.name] || "", autocomplete: "off", spellcheck: "false", autocapitalize: "off", "data-secret": secret ? "1" : null }),
-              el("p", { class: "help" }, f.help ? `${f.help} ` : "", f.url ? extLink(f.url, "Get one ↗") : null));
-          })));
-    }),
+    groups.length ? el("h3", { class: "grp", text: "Shared keys" }) : null,
+    groups.map(groupCard),
+    el("h3", { class: "grp", text: "Per-platform" }),
+    SOURCES.filter((s) => !s.keyGroup).map(sourceCard),
     el("div", { class: "set-bar" },
       el("button", { class: "btn primary", type: "submit", text: "Save keys" }),
       el("button", { class: "btn", type: "button", text: "Clear all keys", onclick: () => { store.remove(KEYS_STORE); state.keys = {}; renderSettings(); resetChips("idle"); renderChips(); $("#setStatus").textContent = "All keys cleared."; } }),

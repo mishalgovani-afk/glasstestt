@@ -146,8 +146,14 @@ function gameTokenSet(game) {
   return set;
 }
 
+// Generic words that are useless alone but meaningful in a phrase ("first impressions",
+// "new season", "official trailer", "launch day"). Dropped as unigrams, kept inside bigrams.
+const SOFT = new Set(["first", "new", "full", "official", "live", "part", "early", "best", "day", "one", "two",
+  "today", "play", "game", "gameplay", "stream", "video", "look", "time"]);
+
 const isNum = (w) => /^\d+(\.\d+)?$/.test(w);
-const isContent = (w, game) => w.length >= 2 && !STOPWORDS.has(w) && !game.has(w) && !isNum(w);
+const isContent = (w, game) => w.length >= 2 && !STOPWORDS.has(w) && !SOFT.has(w) && !game.has(w) && !isNum(w);
+const isPhrasePart = (w, game) => isContent(w, game) || (SOFT.has(w) && !game.has(w)) || (isNum(w) && w.length <= 4);
 
 /** Token counts for a post: unigrams plus adjacent bigrams, title weighted x2. */
 function postTerms(p, game) {
@@ -161,9 +167,7 @@ function postTerms(p, game) {
       if (isContent(a, game)) add(a, w);
       if (i + 1 < ws.length) {
         const b = ws[i + 1];
-        const okA = isContent(a, game) || (isNum(a) && a.length <= 4);
-        const okB = isContent(b, game) || (isNum(b) && b.length <= 4);
-        if (okA && okB && !(isNum(a) && isNum(b)) && (isContent(a, game) || isContent(b, game))) add(a + " " + b, w);
+        if (isPhrasePart(a, game) && isPhrasePart(b, game) && (isContent(a, game) || isContent(b, game))) add(a + " " + b, w);
       }
     }
   }
@@ -414,7 +418,8 @@ function detectBursts(buckets, size, posts) {
 // Step 4: clustering
 
 const SIM_THRESHOLD = 0.22;
-const MERGE_THRESHOLD = 0.45;
+const MERGE_THRESHOLD = 0.45;          // centroid cosine to merge groups within W/2 of each other
+const MERGE_THRESHOLD_OVERLAP = 0.25;  // ... or a looser one when their time ranges overlap
 const MAX_CLUSTERS = 12;
 
 function vectorize(posts) {
@@ -447,6 +452,7 @@ function clusterPosts(posts, vecs, spanMs) {
   const N = posts.length;
   const W = Math.max(12 * HOUR, Math.min(72 * HOUR, spanMs / 10));
   const minPts = Math.max(3, Math.min(8, Math.round(Math.sqrt(N) / 4)));
+  const minSize = Math.max(minPts, Math.min(8, Math.round(Math.sqrt(N) / 2.5)));
   const nbrs = posts.map(() => []);
   for (let i = 0; i < N; i++) {
     if (!vecs[i].ids.length) continue;
@@ -485,7 +491,9 @@ function clusterPosts(posts, vecs, spanMs) {
     outer: for (let a = 0; a < groups.length; a++) {
       for (let b = a + 1; b < groups.length; b++) {
         const gap = Math.max(0, Math.max(ranges[a][0], ranges[b][0]) - Math.min(ranges[a][1], ranges[b][1]));
-        if (gap <= W / 2 && dot(cents[a], cents[b]) >= MERGE_THRESHOLD) {
+        const cos = dot(cents[a], cents[b]);
+        const overlap = Math.min(ranges[a][1], ranges[b][1]) - Math.max(ranges[a][0], ranges[b][0]);
+        if ((gap <= W / 2 && cos >= MERGE_THRESHOLD) || (overlap >= 0 && cos >= MERGE_THRESHOLD_OVERLAP)) {
           groups[a] = groups[a].concat(groups[b]);
           groups.splice(b, 1);
           merged = true;
@@ -494,7 +502,7 @@ function clusterPosts(posts, vecs, spanMs) {
       }
     }
   }
-  groups = groups.filter((g) => g.length >= minPts)
+  groups = groups.filter((g) => g.length >= minSize)
     .sort((a, b) => b.length - a.length || a[0] - b[0])
     .slice(0, MAX_CLUSTERS)
     .map((g) => g.sort((x, y) => x - y));
@@ -631,6 +639,8 @@ function archetypeFor(sig, score, fam, streamShare) {
     if (fam.launch >= 0.3 && sig.platformSpread >= 0.35) return { archetype: "launch-blitz", family: "launch" };
     return { archetype: "sponsored-creator-wave", family: null };
   }
+  // One post holding most of the attention, nothing disclosed: virality beats loose keyword matches.
+  if (sig.engagementSkew >= 0.6 && sig.disclosure < 0.15 && (!top || top[1] < 0.6)) return { archetype: "organic-viral", family: null };
   if (fam.launch >= 0.3 && sig.platformSpread >= 0.35 && fam.launch >= fam.trailer * 0.8) return { archetype: "launch-blitz", family: "launch" };
   if (top && top[1] >= 0.3) {
     const map = { launch: "trailer-reveal", trailer: "trailer-reveal", update: "update-drop", event: "event-or-esports" };
@@ -898,8 +908,18 @@ export function analyze(posts, opts = {}) {
   for (const p of P) if (!firstSeen.has(p.authorKey)) firstSeen.set(p.authorKey, p.t);
   const ctx = { gameSet, firstSeen, rangeStart: startMs, nSources: Object.keys(totals.bySource).length, df, N: P.length, game, badDates };
 
-  const clusters = groups.map((g, i) => analyzeCluster(`c${i + 1}`, g.map((k) => P[k]), ctx, false));
-  if (rest.length) clusters.push(analyzeCluster("background", rest.map((k) => P[k]), ctx, true));
+  // A group with no burst-like or campaign-like character (a recurring question, a weekly
+  // series) is ongoing chatter, not an influx: fold it into the background cluster.
+  let clusters = [];
+  const restIdx = [...rest];
+  for (const g of groups) {
+    const c = analyzeCluster("", g.map((k) => P[k]), ctx, false);
+    if (c.archetype === "background-chatter") restIdx.push(...g);
+    else clusters.push(c);
+  }
+  clusters.forEach((c, i) => { c.id = `c${i + 1}`; });
+  restIdx.sort((a, b) => a - b);
+  if (restIdx.length) clusters.push(analyzeCluster("background", restIdx.map((k) => P[k]), ctx, true));
 
   const insights = buildInsights(clusters, bursts, P, totals, ctx);
 

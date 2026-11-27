@@ -242,17 +242,84 @@ async function twitchSearch(game, { clientId, token }, signal) {
   ];
 }
 
+function redditTimeWindow(sinceDays) {
+  return sinceDays <= 1 ? "day" : sinceDays <= 7 ? "week" : sinceDays <= 31 ? "month" : sinceDays <= 365 ? "year" : "all";
+}
+
+async function getText(url, { signal, timeout = TIMEOUT_MS } = {}) {
+  const ctl = new AbortController();
+  const onAbort = () => ctl.abort(signal.reason);
+  if (signal) { if (signal.aborted) ctl.abort(signal.reason); else signal.addEventListener("abort", onAbort, { once: true }); }
+  const timer = setTimeout(() => ctl.abort(new Error("timeout")), timeout);
+  try {
+    const res = await fetch(url, { signal: ctl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    if (ctl.signal.aborted) throw new Error(`timed out after ${timeout / 1000}s`);
+    if (e instanceof TypeError) throw new Error("network/CORS error (blocked by the browser or offline)");
+    throw e;
+  } finally { clearTimeout(timer); signal?.removeEventListener?.("abort", onAbort); }
+}
+
+/** Parse Reddit's Atom search feed into reddit-JSON-like {data} children. DOMParser when available, regex otherwise. */
+export function parseRedditAtom(xml) {
+  const rows = [];
+  if (typeof DOMParser !== "undefined") {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    if (!doc.querySelector("parsererror")) {
+      for (const e of doc.getElementsByTagName("entry")) {
+        const t = (n) => e.getElementsByTagName(n)[0]?.textContent || "";
+        const cat = e.getElementsByTagName("category")[0];
+        rows.push({ id: t("id"), title: t("title"), author: e.getElementsByTagName("author")[0]?.getElementsByTagName("name")[0]?.textContent || "",
+          link: e.getElementsByTagName("link")[0]?.getAttribute("href") || "", date: t("published") || t("updated"), content: t("content"), sub: cat?.getAttribute("term") || "" });
+      }
+      return rows.map(atomRowToChild).filter(Boolean);
+    }
+  }
+  for (const m of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
+    const b = m[1];
+    const tag = (n) => (new RegExp(`<${n}[^>]*>([\\s\\S]*?)</${n}>`).exec(b)?.[1] || "").replace(/^<!\[CDATA\[|\]\]>$/g, "");
+    rows.push({ id: stripHtml(tag("id")), title: stripHtml(tag("title")), author: stripHtml(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>/.exec(b)?.[1] || ""),
+      link: /<link[^>]*href="([^"]+)"/.exec(b)?.[1] || "", date: stripHtml(tag("published") || tag("updated")), content: tag("content"),
+      sub: /<category[^>]*term="([^"]+)"/.exec(b)?.[1] || "" });
+  }
+  return rows.map(atomRowToChild).filter(Boolean);
+}
+
+function atomRowToChild(r) {
+  const id = String(r.id || "").replace(/^t\d_/, "");
+  if (!id) return null;
+  let permalink = "";
+  try { permalink = new URL(r.link).pathname; } catch { permalink = r.link; }
+  const body = stripHtml(r.content).replace(/\s*submitted by\s*\/u\/\S+\s*\[link\]\s*\[comments\]\s*$/i, "").trim();
+  return { data: { id, title: r.title, selftext: body, author: String(r.author).replace(/^\/?u\//, ""), subreddit: r.sub,
+    permalink, created_utc: Date.parse(r.date) / 1000, ups: null, num_comments: null, link_flair_text: null } };
+}
+
 async function redditSearch(game, sinceDays, signal, limit) {
-  const t = sinceDays <= 1 ? "day" : sinceDays <= 7 ? "week" : sinceDays <= 31 ? "month" : sinceDays <= 365 ? "year" : "all";
+  const t = redditTimeWindow(sinceDays);
   const out = [];
   let after;
-  for (let i = 0; i < Math.min(3, Math.ceil(limit / 100)); i++) {
-    const j = await getJson(`https://www.reddit.com/search.json?${qs({ q: `"${game}"`, sort: "new", t, limit: 100, raw_json: 1, after })}`, { signal });
-    out.push(...(j.data?.children || []).map(normalizeReddit));
-    after = j.data?.after;
-    if (!after) break;
+  try {
+    for (let i = 0; i < Math.min(3, Math.ceil(limit / 100)); i++) {
+      const j = await getJson(`https://www.reddit.com/search.json?${qs({ q: `"${game}"`, sort: "new", t, limit: 100, raw_json: 1, after })}`, { signal });
+      out.push(...(j.data?.children || []).map(normalizeReddit));
+      after = j.data?.after;
+      if (!after) break;
+    }
+    return out;
+  } catch (e) {
+    if (signal?.aborted || out.length) { if (out.length) return out; throw e; }
+    // JSON blocked (CORS / 403 / 429): fall back to the keyless Atom feed (no scores, ~25-100 items)
+    try {
+      const xml = await getText(`https://www.reddit.com/search.rss?${qs({ q: `"${game}"`, sort: "new", t, limit: 100 })}`, { signal });
+      return parseRedditAtom(xml).map(normalizeReddit);
+    } catch (e2) {
+      throw new Error(`${e.message}; RSS fallback also failed: ${e2.message}`);
+    }
   }
-  return out;
 }
 
 async function blueskySearch(game, keys, sinceDays, signal, limit) {
@@ -345,13 +412,18 @@ export const SOURCES = [
     id: "hackernews", name: "Hacker News", kinds: ["article"], needsKey: false, keyFields: [],
     search: (game, o) => hnSearch(game, o.sinceDays, o.signal),
   },
+  ...["tiktok", "instagram", "x", "facebook"].map((id) => ({
+    id, name: APIFY_ACTORS[id].label, kinds: [id === "tiktok" ? "short" : id === "instagram" ? "post" : "post"], needsKey: true,
+    keyGroup: "apify", keyFields: [], search: (game, o) => apifySearch(id, game, o),
+  })),
 ];
 
 /** A source is runnable when it needs no key, or all its non-optional key fields are filled. */
 export function isRunnable(src, keys = {}) {
   if (!src.needsKey) return true;
-  const k = keys[src.id] || {};
-  return src.keyFields.every((f) => f.optional || (k[f.name] && String(k[f.name]).trim()));
+  const k = keys[src.keyGroup || src.id] || {};
+  const fields = src.keyGroup ? KEY_GROUPS[src.keyGroup].keyFields : src.keyFields;
+  return fields.every((f) => f.optional || (k[f.name] && String(k[f.name]).trim()));
 }
 
 export async function searchAll(game, { keys = {}, sinceDays = 30, signal, onProgress, limit = 150, sources = SOURCES } = {}) {
@@ -361,7 +433,7 @@ export async function searchAll(game, { keys = {}, sinceDays = 30, signal, onPro
     if (!isRunnable(src, keys)) { notify({ source: src.id, status: "skipped", count: 0, error: "no API key" }); return []; }
     notify({ source: src.id, status: "loading", count: 0 });
     try {
-      let posts = await src.search(game, { keys: keys[src.id] || {}, sinceDays, signal, limit });
+      let posts = await src.search(game, { keys: keys[src.keyGroup || src.id] || {}, sinceDays, signal, limit });
       posts = filterSince(dedupePosts(posts.filter(Boolean)), sinceDays);
       notify({ source: src.id, status: "done", count: posts.length });
       return posts;

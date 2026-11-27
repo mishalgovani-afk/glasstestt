@@ -22,7 +22,9 @@
   --meter-mid: #fbb315;
   --meter-hi: #dc3c3d;
   --s1: #257de0; --s2: #f47230; --s3: #00b894; --s4: #f2a600;
-  --s5: #ee7fac; --s6: #008a17; --s7: #6a4ce2; --s8: #ec4647; --s-other: #9a9a9a;
+  --s5: #ee7fac; --s6: #008a17; --s7: #6a4ce2; --s8: #ec4647;
+  /* extra tones beyond the 8 validated slots: identity is also carried by legend, tooltip and table */
+  --s9: #4a5d73; --s10: #a0612f; --s11: #86b11a; --s-other: #9a9a9a;
   --lvl-lo: #1b64be; --lvl-mid: #8f5b00; --lvl-hi: #be2a2d;
   --radius: 14px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -38,7 +40,7 @@
     --good-ink: #53c556; --warn-ink: #f2b84b; --crit-ink: #ff8a8b;
     --meter-lo: #338ced;
     --s1: #338ced; --s2: #e76624; --s3: #00a888; --s4: #d28e05;
-    --s5: #e24d8b; --s6: #0aac23; --s7: #9887ef; --s8: #eb6263; --s-other: #6e6e6e;
+    --s5: #e24d8b; --s6: #0aac23; --s7: #9887ef; --s8: #eb6263; --s9: #8fa3b8; --s10: #c58a5f; --s11: #8fcf1a; --s-other: #6e6e6e;
     --shadow: none;
   }
 }
@@ -52,7 +54,7 @@
   --good-ink: #53c556; --warn-ink: #f2b84b; --crit-ink: #ff8a8b;
   --meter-lo: #338ced;
   --s1: #338ced; --s2: #e76624; --s3: #00a888; --s4: #d28e05;
-  --s5: #e24d8b; --s6: #0aac23; --s7: #9887ef; --s8: #eb6263; --s-other: #6e6e6e;
+  --s5: #e24d8b; --s6: #0aac23; --s7: #9887ef; --s8: #eb6263; --s9: #8fa3b8; --s10: #c58a5f; --s11: #8fcf1a; --s-other: #6e6e6e;
   --shadow: none;
 }
 
@@ -309,3 +311,11 @@ dialog.dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .opt { font-weight: 400; color: var(--ink-2); }
 .chk { display: flex; align-items: center; gap: 8px; font-size: 14px; min-height: 36px; }
 .chk input { width: 18px; height: 18px; }
+.grp { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-2); margin: 18px 0 -4px; }
+.cost { margin-top: 10px; font-size: 14px; font-weight: 600; }
+.ads { padding: 16px; }
+.ads .field { max-width: 420px; margin-bottom: 10px; }
+.adlinks { list-style: none; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.adlinks li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); min-width: 0; }
+.adlink { font-weight: 650; font-size: 14px; overflow-wrap: anywhere; }
+.adnote { font-size: 12.5px; color: var(--ink-2); }
