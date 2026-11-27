@@ -493,7 +493,7 @@ function buildDrawer() {
   for (const el of Object.values(f)) el.addEventListener('input', regen);
   text.addEventListener('input', () => showMeta()); subject.addEventListener('input', () => showMeta());
 
-  body.append(seg,
+  const parts = [seg,
     !state.target ? h('p', { class: 'msg', text: 'Tip: choose your game under Find creators first, so the pitch can name it and its genre.' }) : null,
     h('div', { class: 'pitch-fields' }, field('Your name', 'pSender', f.sender), field('Publisher or studio', 'pPub', f.publisher), field('Tone', 'pTone', f.tone), field('Key offer', 'pAccess', f.access)),
     drawerCtx.kind === 'follow' ? null : h('div', { class: 'pitch-fields' }, field('Launch status', 'pPre', f.pre), field('Release window or date', 'pWin', f.window)),
@@ -519,7 +519,8 @@ function buildDrawer() {
             updateEntry(creator.id, (e) => ({ ...e, keys: [...new Set([...(e.keys || []), k])] }));
           }
           updateEntry(creator.id, (e) => setStage(e, 'pitched')); refreshShortlistButtons(); renderBoard(); toast('Moved to Pitched on your board'); closeDrawer();
-        } })));
+        } }))];
+  body.append(...parts.filter(Boolean));
   regen();
 }
 

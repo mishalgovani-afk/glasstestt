@@ -1188,6 +1188,8 @@ function factsBlock(game, diagnosis) {
   if (reviews) lines.push(`Reviews: ${reviews}`);
   const cand = diagnosis?.tagSuggestions ? [...new Set([...(diagnosis.tagSuggestions.reorder || []), ...(diagnosis.tagSuggestions.add || []).map((a) => a.tag)])] : tags;
   lines.push(`Candidate tags for the top 5: ${cand.join(", ") || "(none)"}`);
+  const med = diagnosis?.benchmarks?.medianDescLength;
+  if (med != null) lines.push(`Comparable games' short descriptions: median ${Math.round(med)} characters`);
   return lines.join("\n");
 }
 
@@ -1203,7 +1205,18 @@ function currentCopyBlock(game) {
 }
 
 function comparablesBlock(comps) {
-  const list = comps.filter((c) => stripHtml(c.shortDescription)).slice(0, 8);
+  // Examples: comparables with real copy (60+ chars), duplicates removed, released games with reviews first
+  // (their copy has met real shoppers), keeping relevance order within each group.
+  const seen = new Set();
+  const withCopy = comps.filter((c) => {
+    const t = stripHtml(c.shortDescription);
+    const key = t.toLowerCase().split(str(c.name).toLowerCase()).join("").replace(/\s+/g, " ");
+    if (t.length < 60 || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const proven = withCopy.filter((c) => !c.comingSoon && (num(c.reviews?.total) ?? 0) >= 10);
+  const list = [...proven, ...withCopy.filter((c) => !proven.includes(c))].slice(0, 8);
   if (!list.length) return "(no comparable games available)";
   return list.map((c) => {
     const r = c.reviews && num(c.reviews.total) != null ? `${fmtInt(c.reviews.total)} reviews${num(c.reviews.positivePct) != null ? `, ${Math.round(c.reviews.positivePct)}% positive` : ""}` : "reviews n/a";
@@ -1233,11 +1246,11 @@ function buildRewritePrompt(game, diagnosis, comps) {
     "",
     `<current_copy>\n${currentCopyBlock(game)}\n</current_copy>`,
     "",
-    `<comparable_games note="Successful games with similar tags. Their short descriptions show what works in this genre.">\n${comparablesBlock(comps)}\n</comparable_games>`,
+    `<comparable_games note="Games with similar tags, released and reviewed ones first. Their short descriptions show the genre's conventions.">\n${comparablesBlock(comps)}\n</comparable_games>`,
     "",
     `<audit_findings>\n${findingsBlock(diagnosis)}\n</audit_findings>`,
     "",
-    `<output_format>\nAnswer in this order, using these headings:\n${OUTPUT_FORMAT.join("\n")}\nWrite the copy in the same language as the current copy.\n</output_format>`,
+    `<output_format>\nAnswer in this order, using these headings:\n${OUTPUT_FORMAT.join("\n")}\nWrite the copy in the same language as the current copy.\nBefore you answer, count the characters of every short-description option and rewrite any that go over ${SHORT_DESC_MAX}.\n</output_format>`,
   ].join("\n");
 }
 
@@ -1253,7 +1266,7 @@ export function rewriteRequest(game, diagnosis) {
     "",
     `<rules>\n${COPY_RULES.map((r, i) => `${i + 1}. ${r}`).join("\n")}\n</rules>`,
     "",
-    `<output_format>\nAnswer in this order, using these headings:\n${OUTPUT_FORMAT.join("\n")}\nWrite the copy in the same language as the current copy. Use Markdown headings and lists only; no preamble.\n</output_format>`,
+    `<output_format>\nAnswer in this order, using these headings:\n${OUTPUT_FORMAT.join("\n")}\nWrite the copy in the same language as the current copy. Use Markdown headings and lists only; no preamble.\nBefore you answer, count the characters of every short-description option and rewrite any that go over ${SHORT_DESC_MAX}.\n</output_format>`,
   ].join("\n");
   // Reuse the comparable block that diagnose() embedded in rewritePrompt.
   const compMatch = str(d.rewritePrompt).match(/<comparable_games[\s\S]*?<\/comparable_games>/);
