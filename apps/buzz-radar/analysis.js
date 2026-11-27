@@ -10,10 +10,12 @@
 //      (so the output never depends on input order).
 //   2. Timeline: fixed buckets (1h if the data spans <= 3 days, 6h <= 14 days, 24h otherwise,
 //      weekly past ~400 days) with counts, per-source counts and summed views.
-//   3. Bursts: robust baseline per bucket = rolling median of nearby buckets; spread =
-//      max(1.4826 * MAD, sqrt(baseline), 1) (the sqrt term is a Poisson floor so sparse data
-//      does not fire on every blip). A bucket with z >= 2.5 and at least 3 posts above baseline
-//      seeds a burst, which grows over adjacent buckets with z >= 1.5.
+//   3. Bursts: robust baseline per bucket = 35th percentile of the buckets within +-14 days
+//      (excluding the bucket and its neighbours); spread = max(1.4826 * MAD of the quieter 60%,
+//      sqrt(baseline), 1)
+//      (the sqrt term is a Poisson floor). A bucket seeds a burst when z >= 2.5 with 3+ posts
+//      above baseline, or when it is >= 2.5x baseline with 8+ posts above it; the burst grows
+//      over adjacent buckets that are clearly elevated (z >= 1.5 or >= 1.8x baseline).
 //   4. Clusters: TF-IDF vectors over title (x2), the start of the text, and tags, with
 //      stopwords, URLs and the game's own name removed, plus bigrams ("patch notes", "season 2").
 //      Two posts are neighbours when cosine * timeDecay >= 0.22 and they are within a time
@@ -389,18 +391,28 @@ function detectBursts(buckets, size, posts) {
   const n = buckets.length;
   if (n < 3) return [];
   const counts = buckets.map((b) => b.count);
-  const h = Math.max(4, Math.min(48, Math.round(168 / (size / HOUR))));
+  // Window of +-14 days (capped), skipping the bucket itself and its direct neighbours so a
+  // two-bucket spike can't raise its own baseline. The 35th percentile (not the median) keeps
+  // the baseline honest when a busy month has several spikes inside one window.
+  const h = Math.max(4, Math.min(72, Math.round(336 / (size / HOUR))));
   const base = new Array(n), z = new Array(n);
   for (let i = 0; i < n; i++) {
-    const win = counts.slice(Math.max(0, i - h), Math.min(n, i + h + 1));
-    const med = median(win);
-    const mad = median(win.map((c) => Math.abs(c - med)));
-    const sigma = Math.max(1.4826 * mad, Math.sqrt(Math.max(med, 1)), 1);
-    base[i] = med;
-    z[i] = (counts[i] - med) / sigma;
+    const win = [];
+    for (let k = Math.max(0, i - h); k <= Math.min(n - 1, i + h); k++) if (Math.abs(k - i) > 1) win.push(counts[k]);
+    const sorted = win.sort((a, b) => a - b);
+    const b = quantile(sorted, 0.35);
+    // spread from the quieter 60% of the window only, so other spikes don't inflate it
+    const quiet = sorted.slice(0, Math.max(1, Math.ceil(sorted.length * 0.6)));
+    const mad = median(quiet.map((c) => Math.abs(c - b)));
+    const sigma = Math.max(1.4826 * mad, Math.sqrt(Math.max(b, 1)), 1);
+    base[i] = b;
+    z[i] = (counts[i] - b) / sigma;
   }
-  const hot = (i) => z[i] >= 1.5 && counts[i] > base[i];
-  const seed = (i) => z[i] >= 2.5 && counts[i] - base[i] >= 3;
+  const ratio = (i) => counts[i] / Math.max(base[i], 1);
+  // A bucket is "hot" when clearly above baseline; a burst needs at least one seed bucket that is
+  // either statistically extreme or simply 2.5x the baseline with 8+ extra posts.
+  const hot = (i) => counts[i] > base[i] && counts[i] - base[i] >= 2 && (z[i] >= 1.5 || ratio(i) >= 1.8);
+  const seed = (i) => (z[i] >= 2.5 && counts[i] - base[i] >= 3) || (ratio(i) >= 2.5 && counts[i] - base[i] >= 8);
   const bursts = [];
   let i = 0;
   while (i < n) {
@@ -651,12 +663,15 @@ function platformSpread(members, nSourcesTotal) {
 /**
  * Campaign score (0..100): how much a cluster looks like a paid media push.
  *
- *   S = 0.35*disclosure + 0.15*synchronicity + 0.15*titleSimilarity + 0.08*creatorDiversity
- *     + 0.10*newCreatorShare + 0.05*platformSpread + 0.12*(1 - engagementSkew)
+ *   S = 0.35*disclosure + 0.12*synchronicity + 0.12*titleSimilarity + 0.08*creatorDiversity
+ *     + 0.10*newCreatorShare + 0.05*platformSpread + 0.18*(1 - engagementSkew)
  *   score = 100 * clamp((S - 0.15) / 0.70)          // ~0.15 is what pure noise scores
  *   score *= min(1, 0.4 + 0.15*creators)              // 1-3 creators can't be a "wave"
+ *   score *= 1 - 0.6*max(0, engagementSkew - 0.35)    // one post owning the views = organic
  *   if disclosure >= 0.5 and creators >= 3:           // disclosed = paid by definition
  *     score = max(score, 55 + 40*(disclosure - 0.5))  // 55 at half disclosed, 75 at all
+ *   then, once the archetype is known: score += ARCHETYPE_PRIOR[archetype]
+ *     (launch-blitz +10, trailer-reveal +6, event +3, organic-viral -10, controversy -15)
  *
  * Disclosure dominates because it is the only direct evidence. Timing, templated titles,
  * many first-time creators and evenly spread views are the circumstantial fingerprints of a
@@ -664,14 +679,21 @@ function platformSpread(members, nSourcesTotal) {
  * has the opposite engagement shape: one post holds most of the views.
  */
 function campaignScore(sig, creators) {
-  const S = 0.35 * sig.disclosure + 0.15 * sig.synchronicity + 0.15 * sig.titleSimilarity
+  const S = 0.35 * sig.disclosure + 0.12 * sig.synchronicity + 0.12 * sig.titleSimilarity
     + 0.08 * sig.creatorDiversity + 0.10 * sig.newCreatorShare + 0.05 * sig.platformSpread
-    + 0.12 * (1 - sig.engagementSkew);
+    + 0.18 * (1 - sig.engagementSkew);
   let score = 100 * clamp01((S - 0.15) / 0.7);
   score *= Math.min(1, 0.4 + 0.15 * creators);
+  score *= 1 - 0.6 * Math.max(0, sig.engagementSkew - 0.35);
   if (sig.disclosure >= 0.5 && creators >= 3) score = Math.max(score, 55 + 40 * (sig.disclosure - 0.5));
   return Math.round(Math.max(0, Math.min(100, score)));
 }
+
+// Archetype prior, added to the signal score once the archetype is known. Some patterns are
+// planned marketing by nature (a launch day is an embargo lift plus publisher amplification),
+// others are by nature unplanned (a clip nobody scheduled, a backlash nobody wanted).
+const ARCHETYPE_PRIOR = { "launch-blitz": 10, "trailer-reveal": 6, "event-or-esports": 3, "update-drop": 0,
+  "organic-viral": -10, "controversy": -15 };
 
 /** Rules, checked in order. Returns { archetype, family } (family = keyword family that fired). */
 function archetypeFor(sig, score, fam, streamShare, n) {
@@ -786,7 +808,10 @@ function analyzeCluster(id, members, ctx, isBackground) {
 
   let archetype, family;
   if (isBackground) { archetype = "background-chatter"; family = null; score = Math.min(score, 40); }
-  else ({ archetype, family } = archetypeFor(signals, score, fam, streamShare, n));
+  else {
+    ({ archetype, family } = archetypeFor(signals, score, fam, streamShare, n));
+    score = Math.max(0, Math.min(100, score + (ARCHETYPE_PRIOR[archetype] || 0)));
+  }
 
   const keywords = keywordsFor(members, df, N, gameSet);
   const sponsor = topSponsor(members);
