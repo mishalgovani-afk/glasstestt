@@ -498,7 +498,7 @@ function renderComps(comps) {
       list.append(h('li', { class: 'comp' },
         picture(g.capsuleImage || g.headerImage, `${g.name} capsule image`, 'comp-img', g.name),
         h('div', { style: 'min-width:0' }, h('div', { class: 'comp-name' }, u ? link(u, g.name) : g.name),
-          h('p', { class: 'comp-meta', text: [price$(g), g.reviews && g.reviews.positivePct != null ? `${g.reviews.positivePct}% positive` : null, g.reviews && g.reviews.total != null ? `${fmtCompact(g.reviews.total)} reviews` : null].filter(Boolean).join(' · ') }),
+          h('p', { class: 'comp-meta', text: [price$(g), g.reviews && g.reviews.positivePct != null ? `${g.reviews.positivePct}% positive` : null, g.reviews && g.reviews.total != null ? `${fmtCompact(g.reviews.total)} reviews` : null, g.followers != null ? `${fmtCompact(g.followers)} followers` : null, g.ownersRange ? `${g.ownersRange} owners` : null].filter(Boolean).join(' · ') }),
           (c.sharedTags || []).length ? h('ul', { class: 'chips', 'aria-label': 'Shared tags' }, c.sharedTags.slice(0, 8).map((t) => h('li', { class: 'chip', text: t }))) : null),
         h('div', { class: 'meter', title: 'Similarity' }, h('span', { class: 'sr-only', text: 'Similarity' }), h('span', { class: 'track' }, h('span', { class: 'fill', style: `width:${pct}%` })), h('span', { class: 'val', text: `${pct}%` }))));
     }

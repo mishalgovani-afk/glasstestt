@@ -282,3 +282,4 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 .seg-t { font-weight: 700; font-size: var(--fs-4); }
 .seg-s { font-size: var(--fs-2); color: var(--muted); }
 @media (max-width: 480px) { .seg { grid-template-columns: 1fr; } }
+.area-head .fine { white-space: nowrap; margin: 0; }

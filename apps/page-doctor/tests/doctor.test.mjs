@@ -147,9 +147,13 @@ test("weak game fails the checks it should, with numbers against comparables", (
   const comps = findComparables(weak, corpus);
   const d = diagnose(weak, comps);
   const c = byId(d);
-  for (const id of ["desc-length", "desc-genre", "desc-hook", "tags-top-genre", "tags-missing", "media-screenshots", "media-trailer", "languages-markets", "price-vs-comps", "reviews-count", "reviews-positive"]) {
+  for (const id of ["desc-length", "desc-genre", "desc-hook", "tags-top-genre", "tags-missing", "media-screenshots", "media-trailer", "languages-markets", "price-vs-comps", "reviews-count"]) {
     assert.equal(c[id]?.status, "fail", `${id}: ${c[id]?.status} ${c[id]?.detail}`);
   }
+  assert.equal(c["reviews-positive"], undefined, "no score is shown below 10 reviews, so no positive-% check");
+  assert.match(c["reviews-count"].detail, /Steam shows no review score below 10 reviews/);
+  const mixed = diagnose({ ...weak, reviews: { total: 400, positivePct: 62 } }, comps);
+  assert.equal(byId(mixed)["reviews-positive"].status, "fail");
   assert.match(c["media-screenshots"].detail, /Comparable games median \d+ screenshots; you have 3\./);
   assert.match(c["languages-markets"].detail, /\d+ of \d+ comparable games support Simplified Chinese; you don't\. Chinese is Steam's #2 language/);
   assert.match(c["price-vs-comps"].detail, /Comparable paid games median \$\d+\.\d\d; you're \$4\.99/);
