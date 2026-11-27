@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  RULES, SOURCES, HYGIENE_RULES, AREA_WEIGHTS, DEFAULT_MODEL, SHORT_DESC_MAX,
+  RULES, SOURCES, HYGIENE_RULES, HYGIENE_AUTOMATED, AREA_WEIGHTS, DEFAULT_MODEL, SHORT_DESC_MAX,
   findComparables, diagnose, rewriteRequest, audit, normalizeGame, parseOwners, parseReleaseDate, toTags, tagKind, gradeFor,
 } from "../doctor.js";
 
@@ -78,13 +78,15 @@ test("HYGIENE_RULES: https sources, known areas, unique ids; applied by game sta
   const ids = new Set();
   for (const r of HYGIENE_RULES) {
     assert.ok(!ids.has(r.id), r.id); ids.add(r.id);
-    assert.ok(Object.keys(AREA_WEIGHTS).includes(r.area), r.id);
+    assert.ok([...Object.keys(AREA_WEIGHTS), "technical"].includes(r.area), r.id);
+    assert.ok(["high", "medium", "low"].includes(r.severity), r.id);
     assert.match(r.sourceUrl, /^https:\/\//, r.id);
     assert.ok(r.title && r.detail);
   }
   const released = diagnose(strong, []).manualChecklist.map((m) => m.id);
-  assert.ok(!released.includes("hy-coming-soon-review"), "pre-launch items hidden for released games");
-  assert.ok(released.includes("hy-screens-all-ages"));
+  assert.ok(!released.includes("nextfest-once"), "pre-launch items hidden for released games");
+  assert.ok(released.includes("screens-all-ages") && released.includes("tags-recheck"));
+  assert.ok(!released.includes("ea-yearly-update"));
 });
 
 test("every RULES source is https, and every rule has a title, area and rule text", () => {
@@ -219,7 +221,7 @@ test("score formula is transparent: area scores combine with AREA_WEIGHTS", () =
   // manual items live in manualChecklist, never in the scored checks
   assert.ok(d.checks.every((x) => !x.manual));
   const ml = Object.fromEntries(d.manualChecklist.map((m) => [m.id, m]));
-  assert.ok(ml["capsule-legibility"] && ml["media-first-screens"] && ml["hy-capsule-no-badges"]);
+  assert.ok(ml["capsule-legibility"] && ml["media-first-screens"] && ml["capsule-no-badges"] && ml["tech-content-survey"]);
   for (const m of d.manualChecklist) {
     assert.ok(m.id && m.area && m.title && m.detail, m.id);
     assert.match(m.sourceUrl, /^https:\/\//, m.id);
@@ -275,7 +277,8 @@ test("manual unreleased game with only tags and a description", () => {
   assert.ok(["A", "B", "C", "D", "F"].includes(d.grade));
   const ml = Object.fromEntries(d.manualChecklist.map((m) => [m.id, m]));
   assert.equal(c["capsule-assets"], undefined, "no images known: a manual item, not a fail");
-  assert.ok(ml["capsule-assets"] && ml["wishlist-readiness"] && ml["hy-coming-soon-review"] && ml["hy-next-fest-once"]);
+  assert.ok(ml["capsule-assets"] && ml["wishlist-readiness"] && ml["nextfest-once"] && ml["price-launch-discount"]);
+  assert.equal(c["release-date-window"].status, "warn", "no date given");
   assert.equal(c["page-live"].status, "warn");
   assert.match(c["page-live"].detail, /No Steam page yet/);
   assert.equal(c["desc-genre"].status, "pass");
@@ -418,4 +421,43 @@ test("manual wishlist count is used as-is, not multiplied", () => {
   const w = d.checks.find((c) => c.id === "wishlist-readiness");
   assert.match(w.detail, /^7,000 wishlists\./);
   assert.notEqual(w.status, "fail");
+});
+
+test("researched hygiene rules are all either automated or in the manual checklist", () => {
+  const research = new URL("../src/steam-hygiene.json", import.meta.url);
+  if (!existsSync(fileURLToPath(research))) return;
+  const rules = JSON.parse(readFileSync(research, "utf8"));
+  const manualIds = new Set(HYGIENE_RULES.map((r) => r.id));
+  const autoIds = new Set(RULES.map((r) => r.id));
+  for (const r of rules) {
+    const covered = manualIds.has(r.id) || (HYGIENE_AUTOMATED[r.id] && autoIds.has(HYGIENE_AUTOMATED[r.id]));
+    assert.ok(covered, `research rule ${r.id} not folded in`);
+  }
+});
+
+test("new automatic checks: features list, release-date window, first-month reviews", () => {
+  const withList = make({ name: "L", tags: tagList(DECK_TAGS), aboutText: "Intro.\n\nFeatures\n- Draft cards\n- Brew potions\n- Climb the tower" });
+  assert.equal(byId(diagnose(withList, []))["about-features"].status, "pass");
+  const noList = make({ name: "N", tags: tagList(DECK_TAGS), aboutText: "Just one long paragraph about the lore of the world." });
+  assert.equal(byId(diagnose(noList, []))["about-features"].status, "warn");
+  assert.equal(byId(diagnose({ name: "M", tags: DECK_TAGS }, []))["about-features"], undefined, "skipped without About text");
+
+  const soon = (releaseDate) => byId(diagnose(make({ name: "S", tags: tagList(DECK_TAGS), comingSoon: true, releaseDate, reviews: { total: null } }), [], { now: "2026-11-27" }))["release-date-window"];
+  assert.equal(soon("Mar 4, 2027").status, "pass");
+  assert.equal(soon("March 2027").status, "pass");
+  assert.equal(soon("Q2 2027").status, "warn");
+  assert.equal(soon("Coming soon").status, "warn");
+  assert.match(soon("Dec 5, 2026").detail, /within 14 days/);
+
+  const fresh = make({ name: "F", tags: tagList(DECK_TAGS), releaseDate: "Nov 1, 2026", reviews: { total: 40, positivePct: 90 } });
+  const fm = byId(diagnose(fresh, [], { now: "2026-11-27" }))["reviews-first-month"];
+  assert.equal(fm.status, "warn");
+  assert.match(fm.detail, /Released 26 days ago with 40 reviews.*250 reviews/);
+  assert.equal(byId(diagnose(fresh, [], { now: "2027-06-01" }))["reviews-first-month"], undefined, "only for recent launches");
+});
+
+test("manual checklist is sorted by area, then severity", () => {
+  const ml = diagnose(strong, findComparables(strong, corpus)).manualChecklist;
+  const order = ["capsule", "description", "tags", "media", "price", "languages", "social-proof", "timing", "technical"];
+  for (let i = 1; i < ml.length; i++) assert.ok(order.indexOf(ml[i - 1].area) <= order.indexOf(ml[i].area));
 });

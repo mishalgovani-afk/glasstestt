@@ -263,7 +263,7 @@ export const HYGIENE_RULES = [
   { id: "reviews-label-thresholds", area: "social-proof", severity: "low", when: "released", title: "Review labels need volume",
     detail: "\"Very Positive\" needs 80%+ with 50+ reviews; \"Overwhelmingly Positive\" 95%+ with 500+ (third-party table; claims that these counts unlock algorithm visibility are disputed).",
     sourceUrl: S.reviewThresholds.url },
-  { id: "popular-upcoming", area: "social-proof", severity: "low", when: "prelaunch", title: "Aim for Popular Upcoming",
+  { id: "timing-popular-upcoming", area: "social-proof", severity: "low", when: "prelaunch", title: "Aim for Popular Upcoming",
     detail: "Reaching Steam's Popular Upcoming list is estimated to take roughly 7,000 wishlists, with wishlist velocity and closeness to release also counting (third-party estimate).",
     sourceUrl: S.popularUpcoming.url },
   // Timing
@@ -912,8 +912,8 @@ export function diagnose(game, comparables, opts = {}) {
       checks.push(makeCheck("capsule-assets", "fail", "No capsule image was found in the store data.", "Upload the required capsules in Steamworks: header 920x430, small 462x174, main 1232x706."));
     }
     checks.push(makeCheck("capsule-legibility", "warn",
-      "Manual check: open your small capsule and shrink it to about 120 px wide (roughly how it appears in lists and search). Can you read the game's name in under a second? Does the art say the genre?",
-      "Use only artwork, the game name and an official subtitle (no review scores, awards or taglines). Make the logo large and high-contrast against its background. If you can afford one marketing spend, hire a capsule artist.",
+      "Open your 462x174 small capsule at 120 and 184 px wide: Steam generates those sizes from it for lists and search. Can you read the game's name in under a second? Does the art say the genre?",
+      "Design (recrop) the small capsule instead of shrinking the header: a large, high-contrast logo and one clear piece of art. Use only artwork, the game name and an official subtitle. If you can afford one marketing spend, hire a capsule artist.",
       { manual: true }));
   }
 
@@ -984,6 +984,18 @@ export function diagnose(game, comparables, opts = {}) {
       timeHit ? `Your short description contains time-based or call-to-action text ("${timeHit[0]}").` : "No time-based or call-to-action text.",
       timeHit ? "Remove dates, \"coming soon\", \"wishlist now\" and similar. Use Steam events and announcements for news instead." : "Nothing to change.",
       { weight: 0.5 }));
+
+    // About section: features list (heading or 3+ list-like lines). Skipped when there's no About text.
+    if (about) {
+      const lines = str(g.aboutText).split(/\n+/).map((l) => l.trim());
+      const heading = /\b(key )?features\b/i.test(about);
+      const listLines = lines.filter((l) => /^([-*\u2022\u2013]|\d+[.)])\s+\S/.test(l)).length;
+      const st = heading || listLines >= 3 ? "pass" : "warn";
+      checks.push(makeCheck("about-features", st,
+        st === "pass" ? `Your About section has a features list${listLines ? ` (${plural(listLines, "list line")})` : ""}.` : "No features list found in your About section.",
+        st === "pass" ? "Keep each feature to one line that starts with a concrete verb." : "Add a \"Features\" heading near the bottom with 4-6 one-line bullets, each starting with a verb (Build..., Draft..., Explore...).",
+        { weight: 0.5 }));
+    }
 
     if (g.earlyAccess) {
       const text = `${short}\n${about}`.toLowerCase();
@@ -1219,6 +1231,16 @@ export function diagnose(game, comparables, opts = {}) {
           st === "pass" ? "Strong score: mention it in announcements, not in the capsule art (Valve bans review scores there)." : "Read the negative reviews for repeated complaints and fix or address them in an update; the score is weighted to recent momentum on the page.",
           { weight: 1, score: pct >= 80 ? 1 : pct >= 70 ? 0.6 : pct >= 40 ? 0.25 : 0 }));
       }
+      // Recently launched: the first month's reviews as a breakout benchmark (info, light weight).
+      const relD = parseReleaseDate(g.releaseDate);
+      const age = now && relD ? Math.round((now.getTime() - relD.getTime()) / DAY) : null;
+      if (age != null && age >= 0 && age <= 60 && total != null) {
+        const st = total >= 250 ? "pass" : "warn";
+        checks.push(makeCheck("reviews-first-month", st,
+          `Released ${age} days ago with ${fmtInt(total)} reviews. Zukowski's benchmark: games that don't reach about 250 reviews in their first month rarely break out later.`,
+          st === "pass" ? "Strong start; keep momentum with a first content update." : "Push for reviews now: in-game prompt, a launch update, creators and your Discord. Prioritise reaching 10 (so a score shows), then 50.",
+          { weight: 0.5, score: clamp01(total / 250) }));
+      }
     }
     const followers = num(g.followers);
     if (released && followers != null) {
@@ -1283,6 +1305,20 @@ export function diagnose(game, comparables, opts = {}) {
           tooLate ? "Check in Steamworks that the page has been public for 2+ weeks, or move the release date." : "Keep the page fresh with announcements; every event post notifies followers.",
           { weight: 1 }));
       }
+      {
+        const raw = str(g.releaseDate).trim();
+        const t = raw.toLowerCase();
+        const precision = /^\d{4}-\d{2}-\d{2}/.test(t) || /[a-z]{3}[a-z]*\.?\s+\d{1,2},?\s+\d{4}/.test(t) || /\d{1,2}\s+[a-z]{3}[a-z]*\.?,?\s+\d{4}/.test(t) ? "date"
+          : /^[a-z]{3,9}\.?\s+\d{4}$/.test(t) ? "month" : /q[1-4]\s*\d{4}/.test(t) ? "quarter" : /^\d{4}$/.test(t) ? "year" : "none";
+        const lock = precision === "date" && daysToRelease != null && daysToRelease >= 0 && daysToRelease <= 14
+          ? " Your date is within 14 days, so it can't be changed without contacting Valve." : "";
+        const st = precision === "date" || precision === "month" ? "pass" : "warn";
+        const label = { date: "an exact date", month: "a month", quarter: "a quarter", year: "a year only", none: "no date window" }[precision];
+        checks.push(makeCheck("release-date-window", st,
+          `Your release date shows ${label}${raw ? ` ("${raw}")` : ""}.${lock}`,
+          st === "pass" ? "Good. Only change it if you must; followers notice moves." : "Show the most precise window you can commit to (a month or quarter beats \"Coming soon\"); it tells wishlisters when to expect you.",
+          { weight: 0.5, score: precision === "quarter" ? 0.6 : precision === "year" ? 0.4 : precision === "none" ? 0.3 : 1 }));
+      }
       if (g.hasDemo === true) {
         checks.push(makeCheck("timing-demo", "pass", "You have a demo." + demoComps, "Keep it updated; it's your best wishlist driver before launch.", { weight: 1 }));
       } else {
@@ -1335,9 +1371,11 @@ export function diagnose(game, comparables, opts = {}) {
   const grade = gradeFor(score);
 
   const manualChecklist = [
-    ...checks.filter((c) => c.manual).map((c) => ({ id: c.id, area: c.area, title: c.title, detail: c.detail, fix: c.fix, sourceUrl: c.source })),
-    ...HYGIENE_RULES.filter((r) => hygieneApplies(r, g)).map((r) => ({ id: r.id, area: r.area, title: r.title, detail: r.detail, fix: null, sourceUrl: r.sourceUrl })),
-  ];
+    ...checks.filter((c) => c.manual).map((c) => ({ id: c.id, area: c.area, severity: "high", title: c.title, detail: c.detail, fix: c.fix, sourceUrl: c.source })),
+    ...HYGIENE_RULES.filter((r) => hygieneApplies(r, g)).map((r) => ({ id: r.id, area: r.area, severity: r.severity, title: r.title, detail: r.detail, fix: null, sourceUrl: r.sourceUrl })),
+  ].map((m, i) => ({ m, i }))
+    .sort((a, c) => AREA_ORDER.indexOf(a.m.area) - AREA_ORDER.indexOf(c.m.area) || (SEVERITY_ORDER[a.m.severity] ?? 3) - (SEVERITY_ORDER[c.m.severity] ?? 3) || a.i - c.i)
+    .map(({ m }) => m);
   const autoChecks = checks.filter((c) => !c.manual);
 
   const diagnosis = {
