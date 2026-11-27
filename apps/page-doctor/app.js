@@ -394,7 +394,7 @@ function renderReport() {
       !manual && game.appid ? h('button', { type: 'button', class: 'btn ghost', onclick: () => copyText(location.href.split('#')[0] + `#appid=${game.appid}`, 'Link copied'), text: 'Copy link to this audit' }) : null));
   root.append(head);
 
-  root.append(renderChecks(checks, counts, diag), renderTags(game, diag), renderBenchmarks(game, diag), renderComps(comps), renderRewrite(game, diag));
+  root.append(renderChecks(checks, counts, diag), renderHygiene(game, diag), renderTags(game, diag), renderBenchmarks(game, diag), renderComps(comps), renderRewrite(game, diag));
 }
 
 function renderChecks(checks, counts, diag) {
@@ -608,4 +608,32 @@ function exportMarkdown() {
   L.push('', '## Rewrite prompt', '', '```text', diag.rewritePrompt || '', '```', '');
   const slug = String(game.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'game';
   download(`page-doctor-${slug}.md`, L.join('\n'), 'text/markdown');
+}
+
+/* ---------- Steam hygiene checklist (manual items; ticks remembered per game in this browser) ---------- */
+function hygieneKey(game) {
+  const id = game.appid != null ? String(game.appid) : `manual-${String(game.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`;
+  return `page-doctor:ticks:${id}`;
+}
+function renderHygiene(game, diag) {
+  const items = Array.isArray(diag.manualChecklist) ? diag.manualChecklist.filter((i) => i && i.id && i.title) : [];
+  if (!items.length) return h('div');
+  const key = hygieneKey(game);
+  let done = new Set((store.getJson(key, []) || []).filter((x) => typeof x === 'string'));
+  const progress = h('span', { class: 'fine', 'aria-live': 'polite' });
+  const upd = () => { progress.textContent = `${items.filter((i) => done.has(i.id)).length} of ${items.length} done`; };
+  const areaLabel = (a) => (AREAS.find(([id]) => id === a) || [a, humanize(a || '')])[1];
+  const list = h('ul', { class: 'hyg' }, items.map((i) => {
+    const cb = h('input', { type: 'checkbox', id: `hyg-${i.id}` });
+    cb.checked = done.has(i.id);
+    cb.addEventListener('change', () => { if (cb.checked) done.add(i.id); else done.delete(i.id); store.setJson(key, [...done]); upd(); });
+    return h('li', { class: 'hyg-item' }, cb,
+      h('div', null, h('label', { for: `hyg-${i.id}`, class: 'hyg-t' }, i.title, i.area ? h('span', { class: 'badge plain manual-tag', text: areaLabel(i.area) }) : null),
+        i.detail ? h('p', { text: i.detail }) : null,
+        safeUrl(i.sourceUrl) ? h('p', { class: 'fine' }, link(i.sourceUrl, 'Source')) : null));
+  }));
+  upd();
+  return h('section', { class: 'card', 'aria-labelledby': 'hygTitle' },
+    h('div', { class: 'card-head' }, h('h2', { id: 'hygTitle', text: 'Steam hygiene checklist' }), progress),
+    h('p', { class: 'fine', style: 'margin:-4px 0 8px', text: 'Things data cannot check. Tick them off as you go; your ticks are remembered in this browser.' }), list);
 }

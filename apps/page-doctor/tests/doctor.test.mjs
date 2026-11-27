@@ -97,13 +97,13 @@ test("rules cover the required areas", () => {
 // ---------------------------------------------------------------------------------------------
 // Comparables
 // ---------------------------------------------------------------------------------------------
-test("findComparables: same-niche games, excludes the game itself, hits not excluded", () => {
+test("findComparables: same-niche games, excludes the game itself", () => {
   const target = deckGames[3];
   const comps = findComparables(target, corpus, { limit: 10 });
   assert.equal(comps.length, 10);
   assert.ok(comps.every((c) => c.game.appid !== target.appid), "excludes itself");
   assert.ok(comps.every((c) => !c.game.name.startsWith("Farm")), "no farming games in a deckbuilder's top 10");
-  assert.ok(comps.some((c) => c.game.name === "Spire Hit"), "mega-hit in the niche is a fair comparable");
+  assert.ok(comps.every((c) => c.scaleFit >= 0 && c.scaleFit <= 1));
   for (const c of comps) {
     assert.ok(c.similarity > 0 && c.similarity <= 1.0001);
     assert.ok(c.sharedTags.includes("Roguelike Deckbuilder"));
@@ -112,15 +112,26 @@ test("findComparables: same-niche games, excludes the game itself, hits not excl
   for (let i = 1; i < comps.length; i++) assert.ok(comps[i - 1].rank >= comps[i].rank, "sorted by rank");
 });
 
-test("findComparables ranks by relevance only, not size", () => {
-  // Two games with identical tags: one tiny, one huge. Same similarity, same rank.
-  const tiny = make({ name: "Tiny", tags: tagList(FARM_TAGS), genres: ["Indie"], reviews: { total: 3, positivePct: 100 }, ownersRange: "0 .. 20,000" });
-  const huge = make({ name: "Huge", tags: tagList(FARM_TAGS), genres: ["Indie"], reviews: { total: 500000, positivePct: 98 }, ownersRange: "20,000,000 .. 50,000,000" });
-  const comps = findComparables({ name: "Q", tags: FARM_TAGS }, { games: [tiny, huge, ...deckGames] }, { limit: 5 });
-  const a = comps.find((c) => c.game.name === "Tiny"), b = comps.find((c) => c.game.name === "Huge");
-  assert.equal(a.rank, b.rank);
-  assert.equal(a.tier, "small");
-  assert.equal(b.tier, "hit");
+test("findComparables size-matches: indies get indies, big titles get big titles", () => {
+  const sameTags = tagList(FARM_TAGS);
+  const indie = make({ name: "Indie Farm", tags: sameTags, reviews: { total: 2500, positivePct: 92 }, ownersRange: "100,000 .. 200,000" });
+  const tiny = make({ name: "Tiny Farm", tags: sameTags, reviews: { total: 6, positivePct: 100 }, ownersRange: "0 .. 20,000" });
+  const huge = make({ name: "Huge Farm", tags: sameTags, reviews: { total: 500000, positivePct: 98 }, ownersRange: "20,000,000 .. 50,000,000" });
+  const soon = make({ name: "Soon Farm", tags: sameTags, comingSoon: true, reviews: { total: null, positivePct: null }, ownersRange: null, followers: 4000 });
+  const pool = { games: [tiny, huge, indie, soon, ...deckGames] };
+  const order = (target) => findComparables(target, pool, { limit: 6 }).map((c) => c.game.name);
+
+  // Unreleased manual indie: successful indie and upcoming peers first; the mega-hit is still listed, lower.
+  const forIndie = order({ name: "My Farm", tags: FARM_TAGS });
+  assert.deepEqual(forIndie.slice(0, 2).sort(), ["Indie Farm", "Soon Farm"]);
+  assert.ok(forIndie.indexOf("Huge Farm") > forIndie.indexOf("Indie Farm"));
+  assert.ok(forIndie.includes("Huge Farm"), "mega-hits stay eligible");
+  // A small released indie (few reviews) is also benchmarked against successful indies.
+  assert.equal(order(make({ name: "Small", tags: sameTags, reviews: { total: 30, positivePct: 90 } }))[0], "Indie Farm");
+  // A big title gets the big title first.
+  assert.equal(order(make({ name: "Big", tags: sameTags, reviews: { total: 300000, positivePct: 95 }, ownersRange: "10,000,000 .. 20,000,000" }))[0], "Huge Farm");
+  // Relevance still dominates scale: a same-size game from another niche never beats a niche peer.
+  assert.ok(!findComparables({ name: "My Farm", tags: FARM_TAGS }, pool, { limit: 4 }).some((c) => c.game.name.startsWith("Deck")));
 });
 
 test("findComparables: tag order matters (top tags weigh more)", () => {
@@ -137,7 +148,8 @@ test("findComparables works from tags alone (manual game) and is deterministic",
   assert.deepEqual(a.map((c) => c.game.appid), b.map((c) => c.game.appid));
   assert.ok(a.length >= 10);
   assert.ok(a.slice(0, 10).every((c) => c.game.name.startsWith("Deck") || c.game.name === "Spire Hit"));
-  assert.ok(a.some((c) => c.tier === "upcoming"), "upcoming games are fair comparables");
+  assert.ok(a.slice(0, 8).some((c) => c.tier === "upcoming"), "upcoming games rank well for an unreleased game");
+  assert.notEqual(a[0].game.name, "Spire Hit", "an unreleased indie isn't benchmarked first against the mega-hit");
 });
 
 // ---------------------------------------------------------------------------------------------

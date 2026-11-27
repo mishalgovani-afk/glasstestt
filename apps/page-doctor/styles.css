@@ -284,3 +284,10 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 @media (max-width: 480px) { .seg { grid-template-columns: 1fr; } }
 .area-head .fine { white-space: nowrap; margin: 0; }
 .manual-tag { margin-left: 8px; font-size: var(--fs-1); vertical-align: middle; }
+
+.hyg { list-style: none; margin: 0; padding: 0; }
+.hyg-item { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.hyg-item:last-child { border-bottom: 0; }
+.hyg-item input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); }
+.hyg-item .hyg-t { font-size: var(--fs-4); font-weight: 600; color: var(--text); margin: 0 0 2px; cursor: pointer; }
+.hyg-item p { margin: 0 0 4px; font-size: var(--fs-3); overflow-wrap: anywhere; }
