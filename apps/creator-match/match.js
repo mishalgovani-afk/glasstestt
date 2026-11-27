@@ -16,8 +16,8 @@ export const GUIDE = {
       sourceUrl: "https://howtomarketagame.com/2021/07/12/how-to-market-your-indie-game-a-10-step-plan/",
     },
     {
-      title: "Small, active channels reply far more often",
-      body: "One indie campaign to 200 streamers with the same pitch got a 25% reply rate from channels under 20K subscribers that were actively posting, and 0.5% from channels above 50K (a single, vendor-reported case). Small and mid-size tiers score highest by default.",
+      title: "Smaller, active channels reply more often",
+      body: "One indie campaign to 200 streamers with the same pitch got a 25% reply rate from channels under 20K subscribers that were actively posting, and 0.5% from channels above 50K (a single, vendor-reported case). Size never changes the score here; use the size filter to aim for the reply rate or the reach you want.",
       sourceUrl: "https://gameoutreach.co/blog/youtuber-outreach-email-template/",
     },
     {
@@ -81,7 +81,9 @@ export const GUIDE = {
 // ---------------------------------------------------------------------------
 
 /** Points per component; they add up to 100. */
-export const WEIGHTS = Object.freeze({ affinity: 25, coverage: 25, indie: 10, activity: 15, size: 12, engagement: 8, language: 5 });
+// Relevance first: what they covered, how recently, and how well their tags fit. Size never changes the score:
+// it's a filter the user chooses (all sizes by default), so big creators and big-hit channels are not penalised.
+export const WEIGHTS = Object.freeze({ coverage: 40, affinity: 30, activity: 15, language: 10, engagement: 5 });
 
 // Tags that nearly every indie game has: they still count, but at 30% weight, so they cannot carry a match alone.
 export const GENERIC_TAGS = new Set(["indie", "singleplayer", "multiplayer", "early access", "free to play", "great soundtrack",
@@ -96,8 +98,6 @@ export const SIZE_TIERS = Object.freeze([
   { tier: "large", max: Infinity, label: "Large (250K+)" },
 ]);
 
-/** Default size fit for a small publisher: reachable tiers score higher. 0..1. */
-export const DEFAULT_SIZE_WEIGHTS = Object.freeze({ micro: 0.8, small: 1, mid: 0.65, large: 0.25, unknown: 0.5 });
 
 // avgViews / followers that counts as "full marks" engagement, per platform.
 // Twitch avgViews is usually average concurrent viewers, so its healthy ratio is much lower.
@@ -241,22 +241,24 @@ function prepareTarget(target) {
     total,
     tagNames: tagList(t.tags),
     language: normalizeLanguage(t.language),
+    allGeneric: [...weights.keys()].every((k) => GENERIC_TAGS.has(k)),
   };
 }
 
 function similarity(tags, tgt) {
-  if (!tgt.total || !tags.length) return { sim: 0, shared: [] };
+  if (!tgt.total || !tags.length) return { sim: 0, shared: [], specific: false };
   let s = 0;
   const shared = [];
   const seen = new Set();
+  let specific = false;
   for (const k of tags) {
     if (seen.has(k)) continue;
     seen.add(k);
     const w = tgt.weights.get(k);
-    if (w) { s += w; shared.push(k); }
+    if (w) { s += w; shared.push(k); if (!GENERIC_TAGS.has(k)) specific = true; }
   }
   shared.sort((a, b) => tgt.weights.get(b) - tgt.weights.get(a));
-  return { sim: s / tgt.total, shared };
+  return { sim: s / tgt.total, shared, specific };
 }
 
 const MATCH_THRESHOLD = 0.25; // a covered game counts as "similar" at ≥ 25% weighted tag overlap
@@ -281,7 +283,7 @@ function matchGames(creator, tgt, index, now) {
       if (sig >= 0.75) indie.small++;
       if (sig === 0) { indie.mega++; if (!indie.megaExample) indie.megaExample = str(g.name); }
     }
-    const { sim, shared } = similarity(tags, tgt);
+    const { sim, shared, specific } = similarity(tags, tgt);
     const t = toTime(g.date);
     const daysAgo = t == null ? null : Math.max(0, Math.floor((now - t) / DAY));
     const recency = daysAgo == null ? 0.3 : Math.pow(0.5, daysAgo / COVERAGE_HALF_LIFE);
@@ -291,7 +293,8 @@ function matchGames(creator, tgt, index, now) {
       weight: (isTarget ? 1 : sim) * recency,
     };
     if (isTarget) { if (!coveredTarget || m.weight > coveredTarget.weight) coveredTarget = m; continue; }
-    if (sim >= MATCH_THRESHOLD) out.push(m);
+    // A match needs a shared non-generic tag ("Indie" alone isn't similarity), unless the target only has generic tags.
+    if (sim >= MATCH_THRESHOLD && (specific || tgt.allGeneric)) out.push(m);
   }
   out.sort((a, b) => b.weight - a.weight || (b.views || 0) - (a.views || 0) || a.name.localeCompare(b.name));
   return { matched: out, coveredTarget, indie };
@@ -335,11 +338,12 @@ function platformList(p) {
 
 /**
  * Rank creators for a target game.
- * Score (0..100) = 25 × tag affinity + 25 × similar coverage + 10 × indie focus + 15 × activity
- *                 + 12 × size fit + 8 × engagement + 5 × language, each component 0..1 (see `breakdown`).
+ * Score (0..100) = 40 × similar coverage + 30 × tag affinity + 15 × activity + 10 × language + 5 × engagement,
+ * each component 0..1 (see `breakdown`). Follower count is never scored; use the size filters.
  * Works from tags alone: target = { name, tags } is enough; appid only spots past coverage of the game itself.
  * Options: platform (string or array), minFollowers, maxFollowers, language, activeWithinDays = 90 (0/null = off),
- *   sizeWeights {micro, small, mid, large, unknown}, now (ms or ISO), limit, excludeIds (array/Set), includeIrrelevant.
+ *   sizes (array of "micro"|"small"|"mid"|"large"; default all), now (ms or ISO), limit, excludeIds (array/Set),
+ *   includeIrrelevant. Creators with unknown followers pass the size filters (check `sizeKnown`).
  */
 export function rankCreators(target, data, options = {}) {
   const opts = options && typeof options === "object" ? options : {};
@@ -351,7 +355,8 @@ export function rankCreators(target, data, options = {}) {
   const maxF = num(opts.maxFollowers);
   const wantLang = normalizeLanguage(opts.language) || null;
   const activeDays = opts.activeWithinDays === undefined ? 90 : num(opts.activeWithinDays);
-  const sizeW = { ...DEFAULT_SIZE_WEIGHTS, ...(opts.sizeWeights && typeof opts.sizeWeights === "object" ? opts.sizeWeights : {}) };
+  const sizeSet = arr(typeof opts.sizes === "string" ? [opts.sizes] : opts.sizes).map(lc).filter((x) => SIZE_TIERS.some((t) => t.tier === x));
+  const sizes = sizeSet.length ? new Set(sizeSet) : null;
   const exclude = opts.excludeIds instanceof Set ? opts.excludeIds : new Set(arr(opts.excludeIds));
   const results = [];
 
@@ -363,6 +368,8 @@ export function rankCreators(target, data, options = {}) {
     const followers = num(creator.followers);
     if (followers != null && minF != null && followers < minF) continue;
     if (followers != null && maxF != null && followers > maxF) continue;
+    const tier = sizeTierOf(followers);
+    if (sizes && tier && !sizes.has(tier)) continue;
     const lang = normalizeLanguage(creator.language);
     if (wantLang && lang && lang !== wantLang) continue;
     const lastT = lastActiveTime(creator);
@@ -379,17 +386,10 @@ export function rankCreators(target, data, options = {}) {
     if (coveredTarget) covSum += coveredTarget.weight + 0.5; // past coverers convert best
     const coverage = clamp01(covSum / COVERAGE_CAP);
 
-    // Indie focus: average small-game signal over all coverage; neutral 0.5 without data.
-    // Shrunk toward 0.5 with few data points, so one demo video doesn't max it out.
-    const indie = indieStats.n ? (indieStats.sum + 0.5) / (indieStats.n + 1) : 0.5;
-
     const upm = num(creator.uploadsPerMonth);
     const recentPart = inactiveDays == null ? 0.4 : Math.pow(0.5, inactiveDays / 45);
     const uploadPart = upm == null ? 0.4 : clamp01(upm / 8);
     const activity = 0.6 * recentPart + 0.4 * uploadPart;
-
-    const tier = sizeTierOf(followers);
-    const size = clamp01(num(sizeW[tier || "unknown"]) ?? 0.5);
 
     const avgViews = num(creator.avgViews);
     const ratio = avgViews != null && followers ? avgViews / followers : null;
@@ -400,13 +400,11 @@ export function rankCreators(target, data, options = {}) {
     const language = !wantL ? 1 : !lang ? 0.5 : lang === wantL ? 1 : 0;
 
     const breakdown = {
-      affinity: round1(WEIGHTS.affinity * affinity.value),
       coverage: round1(WEIGHTS.coverage * coverage),
-      indie: round1(WEIGHTS.indie * indie),
+      affinity: round1(WEIGHTS.affinity * affinity.value),
       activity: round1(WEIGHTS.activity * activity),
-      size: round1(WEIGHTS.size * size),
-      engagement: round1(WEIGHTS.engagement * engagement),
       language: round1(WEIGHTS.language * language),
+      engagement: round1(WEIGHTS.engagement * engagement),
     };
     const raw = Object.values(breakdown).reduce((a, b) => a + b, 0);
     const score = Math.max(0, Math.min(100, Math.round(raw)));
@@ -420,6 +418,8 @@ export function rankCreators(target, data, options = {}) {
       sizeTier: tier || "micro",
       sizeKnown: tier != null,
       coveredTarget: !!coveredTarget,
+      // What kind of games they cover (info only, never scored): counts over covered games with known data.
+      profile: { rated: indieStats.n, smallOrUpcoming: indieStats.small, bigHits: indieStats.mega },
       breakdown,
       _raw: raw,
     });
@@ -477,12 +477,7 @@ function buildReasons(c) {
     const views = top.views != null ? ` (${formatCount(top.views)} views)` : "";
     reasons.push(`${verb} ${list.length} ${label}${span}, incl. '${top.name || top.title}'${views}`);
   }
-  if (indieStats.n >= 2 && indieStats.small / indieStats.n >= 0.5) {
-    reasons.push(`Covers small indies: ${indieStats.small} of ${indieStats.n} rated games were demos, upcoming or under 5K reviews`);
-  } else if (indieStats.n >= 2 && indieStats.mega / indieStats.n >= 0.5) {
-    reasons.push(`Mostly covers big hits: ${indieStats.mega} of ${indieStats.n} games have 100K+ reviews, e.g. '${indieStats.megaExample}'`);
-  }
-  if (affinity.parts.length && reasons.length < 3) {
+  if (affinity.parts.length) {
     const tags = affinity.parts.slice(0, 2).map((p) => `${displayTag(tgt, p.tag)} ${Math.round(p.value * 100)}%`).join(", ");
     reasons.push(`Tag fit ${Math.round(affinity.value * 100)}%: ${tags}`);
   }
@@ -494,6 +489,11 @@ function buildReasons(c) {
     reasons.push(s);
   } else {
     reasons.push("Follower count unknown");
+  }
+  if (indieStats.n >= 2 && indieStats.small / indieStats.n >= 0.5) {
+    reasons.push(`Covers indies: ${indieStats.small} of ${indieStats.n} games with data were demos, upcoming or under 5K reviews`);
+  } else if (indieStats.n >= 2 && indieStats.mega / indieStats.n >= 0.5) {
+    reasons.push(`Covers big releases: ${indieStats.mega} of ${indieStats.n} games have 100K+ reviews, e.g. '${indieStats.megaExample}'`);
   }
   if (reasons.length < 4) {
     const bits = [];

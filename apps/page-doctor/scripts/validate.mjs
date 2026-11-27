@@ -49,3 +49,21 @@ export function validateCorpus(c, { minGames = 1 } = {}) {
   }
   return errs;
 }
+
+/** data/catalog.json: { generatedAt, source, games: [[appid, name, "u"?], ...] } (compact: appid + name only). */
+export function validateCatalog(c, { minGames = 1 } = {}) {
+  const errs = [];
+  if (!c || typeof c !== "object") return ["catalog is not an object"];
+  if (typeof c.generatedAt !== "string" || Number.isNaN(Date.parse(c.generatedAt))) errs.push("generatedAt must be an ISO date string");
+  if (c.source !== "live" && c.source !== "sample") errs.push('source must be "live" or "sample"');
+  if (!Array.isArray(c.games)) return [...errs, "games must be an array"];
+  if (c.games.length < minGames) errs.push(`expected at least ${minGames} entries`);
+  const ids = new Set();
+  for (const [i, e] of c.games.entries()) {
+    if (errs.length > 20) break;
+    if (!Array.isArray(e) || !Number.isFinite(e[0]) || e[0] <= 0 || typeof e[1] !== "string" || !e[1] || (e.length > 2 && e[2] !== "u")) errs.push(`games[${i}] must be [appid, name, "u"?]`);
+    else if (ids.has(e[0])) errs.push(`games[${i}] duplicate appid ${e[0]}`);
+    else ids.add(e[0]);
+  }
+  return errs;
+}

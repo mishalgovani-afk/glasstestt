@@ -111,15 +111,21 @@ test("irrelevant, stale and junk creators are dropped", () => {
   assert.ok(ids(rank({ activeWithinDays: 0 })).includes("youtube:stale"), "activeWithinDays 0 turns the filter off");
 });
 
-test("small creators beat a huge one by default; configurable", () => {
+test("size never changes the score; sizes filter works", () => {
   const rs = rank();
-  const pos = (id, list) => ids(list).indexOf(id);
-  assert.ok(pos("youtube:best", rs) < pos("youtube:huge", rs));
   const huge = rs.find((r) => r.creator.id === "youtube:huge");
   assert.equal(huge.sizeTier, "large");
-  const bigFirst = rank({ sizeWeights: { large: 1, micro: 0.2, small: 0.2, mid: 0.2 } });
-  const h2 = bigFirst.find((r) => r.creator.id === "youtube:huge");
-  assert.ok(h2.score > huge.score);
+  assert.equal(huge.breakdown.size, undefined, "no size component");
+  // Same creator, different follower count: identical score.
+  const clone = { ...CREATORS[0], id: "youtube:best-big", followers: 2400000, avgViews: 610000 };
+  const both = rankCreators(TARGET, { ...DATA, creators: [CREATORS[0], clone] }, { now: NOW });
+  assert.equal(both[0].score, both[1].score);
+  const small = rank({ sizes: ["micro", "small"] });
+  assert.ok(!ids(small).includes("youtube:huge"));
+  assert.ok(small.every((r) => !r.sizeKnown || ["micro", "small"].includes(r.sizeTier)));
+  assert.ok(ids(small).includes("curator:affonly"), "unknown size passes the filter");
+  assert.deepEqual(ids(rank({ sizes: ["large"] })).filter((id) => CREATORS.find((c) => c && c.id === id).followers != null), ["youtube:huge"]);
+  assert.deepEqual(ids(rank({ sizes: ["bogus"] })), ids(rs), "unknown tier names are ignored");
 });
 
 test("a creator who already covered the target is flagged", () => {
@@ -262,7 +268,8 @@ test("pitch finds matches itself when given data; fills known values", () => {
   const p = draftPitch(dana, TARGET, { data: DATA, now: NOW, publisher: "Tiny Lantern", senderName: "Sam", launchDate: "March 3, 2027",
     embargoDate: "Feb 24, 2027", pressKitUrl: "https://tinylantern.games/press", steamKey: "AAAAA-BBBBB-CCCCC", hook: "A deckbuilder where cards burn." });
   checkPitch(p);
-  assert.equal(p.prelaunch, false, "launch date given and in the past? no: a string date in the future");
+  assert.equal(p.prelaunch, true);
+  assert.match(p.body, /Release window: March 3, 2027\. Embargo: Feb 24, 2027\./);
   assert.match(p.body, /Gloomcrawl/);
   assert.match(p.body, /AAAAA-BBBBB-CCCCC/);
   assert.match(p.body, /Feb 24, 2027/);
@@ -297,6 +304,106 @@ test("pitch edge cases don't throw", () => {
   assert.ok(f.wordCount < 80);
   assert.match(f.body, /Curator Connect/);
   assert.doesNotThrow(() => draftFollowUp());
+});
+
+// --- Unreleased indie targets (the usual case) ------------------------------
+
+// Games with review counts and coming-soon flags, the way the Steam fetch can provide them.
+const INDIE_GAMES = [
+  { appid: 11, name: "Moss Lantern", tags: ["Roguelite", "Deckbuilding", "Pixel Graphics"], reviews: { total: 340 } },
+  { appid: 12, name: "Tiny Tactics", tags: ["Deckbuilding", "Strategy", "Indie"], reviews: { total: 2100 } },
+  { appid: 13, name: "Ember Vault", tags: ["Roguelite", "Deckbuilding"], comingSoon: true },
+  { appid: 21, name: "Slay the Spire", tags: ["Roguelite", "Deckbuilding", "Card Game", "Strategy"], reviews: { total: 180000 } },
+  { appid: 22, name: "Balatro", tags: ["Roguelite", "Deckbuilding", "Card Game"], reviews: { total: 160000 } },
+  { appid: 23, name: "Hades", tags: ["Roguelite", "Action", "Indie"], reviews: { total: 250000 } },
+];
+const vid = (appid, days, views, title) => ({ appid, name: INDIE_GAMES.find((g) => g.appid === appid).name, url: `https://example.com/${appid}`,
+  date: ago(days), title: title || `${INDIE_GAMES.find((g) => g.appid === appid).name} first impressions`, views });
+const base = { platform: "youtube", followers: 20000, language: "en", lastActive: ago(2), uploadsPerMonth: 8, avgViews: 4000 };
+const INDIE_DATA = {
+  generatedAt: ago(0), source: "live", games: INDIE_GAMES,
+  creators: [
+    { ...base, id: "youtube:indiehunter", name: "Hidden Gem Hunter", coveredGames: [vid(11, 10, 8000), vid(12, 20, 5000), vid(13, 30, 6000, "Ember Vault demo | Next Fest")] },
+    { ...base, id: "youtube:hitsonly", name: "Big Hits Only", coveredGames: [vid(21, 10, 9000), vid(22, 20, 12000), vid(23, 30, 15000)] },
+    { ...base, id: "youtube:nextfest", name: "Fest Diver", coveredGames: [{ appid: null, name: "Some Demo", date: ago(5), title: "10 Next Fest demos you missed", views: 3000, tags: ["Roguelite", "Deckbuilding"] }] },
+  ],
+};
+const UNRELEASED = { name: "Cinder Hand", tags: ["Roguelite", "Deckbuilding", "Pixel Graphics", "Indie"] }; // no appid, no page, no reviews
+
+test("unreleased target with tags only: ranks by relevance, big-hit channels not penalised", () => {
+  const rs = rankCreators(UNRELEASED, INDIE_DATA, { now: NOW });
+  assert.equal(rs.length, 3);
+  const hunter = rs.find((r) => r.creator.id === "youtube:indiehunter");
+  const hits = rs.find((r) => r.creator.id === "youtube:hitsonly");
+  assert.ok(hunter.matchedGames.length >= 2 && hits.matchedGames.length >= 2);
+  assert.ok(hits.score >= 40, `big-hit coverer of similar games still scores well: ${hits.score}`);
+  assert.equal(hits.breakdown.indie, undefined, "no indie/size component in the score");
+  assert.deepEqual(hunter.profile, { rated: 3, smallOrUpcoming: 3, bigHits: 0 });
+  assert.deepEqual(hits.profile, { rated: 3, smallOrUpcoming: 0, bigHits: 3 });
+  assert.ok(hunter.reasons.some((r) => /Covers indies: 3 of 3/.test(r)), hunter.reasons.join(" | "));
+  assert.ok(hits.reasons.some((r) => /Covers big releases: 3 of 3 .*'Slay the Spire'/.test(r)), hits.reasons.join(" | "));
+  // A big target works too, and the big-hit channel is a fine match for it.
+  const big = rankCreators({ name: "Spire Clone", tags: ["Roguelite", "Deckbuilding", "Card Game"], appid: 77 }, INDIE_DATA, { now: NOW });
+  assert.ok(ids(big).includes("youtube:hitsonly"));
+  assert.ok(rs.every((r) => !r.coveredTarget));
+  // String tags work too.
+  assert.deepEqual(ids(rankCreators({ name: "Cinder Hand", tags: "Roguelite, Deckbuilding" }, INDIE_DATA, { now: NOW })).sort(), ids(rs).sort());
+  // Next Fest/demo wording counts as an indie signal even without review data.
+  const fest = rs.find((r) => r.creator.id === "youtube:nextfest");
+  assert.deepEqual(fest.profile, { rated: 1, smallOrUpcoming: 1, bigHits: 0 });
+});
+
+test("a generic tag alone can't make a match", () => {
+  const rs = rankCreators({ name: "X", tags: ["Indie", "Farming Sim"] }, INDIE_DATA, { now: NOW });
+  assert.ok(!ids(rs).includes("youtube:indiehunter"), "sharing only 'Indie' is not enough");
+});
+
+test("pre-launch pitch for a tags-only game: preview key, wishlist ask, release window, no press kit", () => {
+  const r = rankCreators(UNRELEASED, INDIE_DATA, { now: NOW })[0];
+  assert.equal(isPrelaunch(UNRELEASED, NOW), true);
+  for (const platform of ["youtube", "twitch", "steam-curator"]) {
+    const creator = { ...r.creator, platform };
+    const p = draftPitch(creator, UNRELEASED, { matchedGames: r.matchedGames, publisher: "Tiny Lantern", now: NOW });
+    checkPitch(p);
+    assert.equal(p.prelaunch, true);
+    assert.match(p.body, /\[release window\]/);
+    assert.match(p.body, /wishlist/i);
+    assert.match(p.body, /\[Steam page link\]/, "no Steam page yet: placeholder, not an invented URL");
+    assert.match(p.body, /\[press kit or trailer link\]/);
+    assert.match(p.body, /upcoming/);
+    assert.ok(p.body.includes(r.matchedGames[0].name));
+    if (platform === "steam-curator") assert.match(p.body, /as soon as our Steam page is live/);
+    else assert.match(p.body, /preview build/);
+  }
+  const demo = draftPitch(r.creator, UNRELEASED, { matchedGames: r.matchedGames, access: "demo", pressKit: false });
+  checkPitch(demo);
+  assert.match(demo.body, /free demo is on Steam: \[demo link\]/);
+  assert.doesNotMatch(demo.body, /Press kit/i, "pressKit: false drops the line");
+  assert.match(demo.subject, /^Cinder Hand: an upcoming Roguelite game for fans of /);
+  const play = draftPitch({ ...r.creator, platform: "twitch" }, UNRELEASED, { matchedGames: r.matchedGames, access: "playtest", trailerUrl: "https://youtu.be/abc" });
+  checkPitch(play);
+  assert.match(play.body, /\[playtest key\]/);
+  assert.match(play.body, /Trailer: https:\/\/youtu\.be\/abc/);
+  assert.match(play.body, /streaming the playtest before launch/);
+  const hooked = draftPitch(r.creator, { ...UNRELEASED, pitch: "A deckbuilder where every card you play burns away." }, { matchedGames: r.matchedGames });
+  assert.match(hooked.body, /every card you play burns away/);
+});
+
+test("launched game pitch uses launch date and embargo", () => {
+  const launched = { ...TARGET, releaseDate: "2026-10-01" };
+  assert.equal(isPrelaunch(launched, NOW), false);
+  assert.equal(isPrelaunch({ ...TARGET, releaseDate: "2027-03-01" }, NOW), true);
+  assert.equal(isPrelaunch({ ...TARGET, released: true }, NOW), false);
+  const r = rank()[0];
+  const p = draftPitch(r.creator, launched, { matchedGames: r.matchedGames, now: NOW });
+  checkPitch(p);
+  assert.equal(p.prelaunch, false);
+  assert.match(p.body, /Embargo: \[embargo date\]\. Launch: Oct 1, 2026|Launch: 2026-10-01/);
+  assert.doesNotMatch(p.body, /wishlist/i);
+  assert.match(p.body, /after the embargo lifts/);
+  const f = draftFollowUp(r.creator, launched, { now: NOW });
+  assert.match(f.body, /Launch: 2026-10-01/);
+  assert.match(draftFollowUp(r.creator, UNRELEASED, { now: NOW }).body, /Release window: \[release window\]/);
 });
 
 // --- Pipeline -------------------------------------------------------------

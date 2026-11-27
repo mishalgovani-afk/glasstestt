@@ -203,7 +203,7 @@ export function parseAppReviews(json) {
  */
 export function parseSearchRows(resultsHtml) {
   const html = String(resultsHtml ?? "");
-  const chunks = html.split(/(?=<a\b[^>]*search_result_row)/).filter((c) => /search_result_row/.test(c.slice(0, 600)));
+  const chunks = html.split(/(?=<a\b[^>]*search_result_row)/).filter((c) => /search_result_row/.test(c.slice(0, 2500)));
   const rows = [];
   for (const c of chunks) {
     const m = c.match(/data-ds-appid="(\d+)"/);

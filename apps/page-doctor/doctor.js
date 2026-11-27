@@ -26,6 +26,8 @@ export const SOURCES = {
   gdcoFollowers: { title: "GameDiscoverCo: How Steam followers and wishlists relate", url: "https://newsletter.gamediscover.co/p/deep-dive-how-steam-followers-and" },
   gdcoFollowers2023: { title: "Game World Observer: followers x12 = wishlists (GameDiscoverCo, June 2023)", url: "https://gameworldobserver.com/2023/06/22/how-to-count-wishlists-steam-followers-multiplier" },
   reviewThresholds: { title: "Steam review score thresholds (community-documented)", url: "https://www.steampageanalyzer.com/blog/steam-review-score-thresholds" },
+  steamWishlist: { title: "Steamworks: Wishlists", url: "https://partner.steamgames.com/doc/marketing/wishlist" },
+  pageLiveEarly: { title: "GameDev.net: So you want to have a kick-ass Steam page", url: "https://www.gamedev.net/tutorials/business/business-and-law/so-you-want-to-have-a-kick-ass-steam-page-r5132/" },
 };
 
 const S = SOURCES;
@@ -94,6 +96,12 @@ export const RULES = [
   { id: "followers", area: "social-proof", check: "auto", title: "Follower count against comparable games",
     rule: "For unreleased games, wishlists are typically 5x-14x followers (median 9.6x in 2021; 12x in June 2023, GameDiscoverCo). The multiplier breaks down after release.",
     sources: [S.gdcoFollowers, S.gdcoFollowers2023] },
+  { id: "wishlist-readiness", area: "social-proof", check: "auto", title: "Wishlist momentum before launch",
+    rule: "Before launch there are no reviews: wishlists are the social proof that matters. Followers are public; wishlists are typically 5x-14x followers for unreleased games (median 9.6x in 2021, 12x in June 2023). Track the real number in Steamworks' wishlist reports.",
+    sources: [S.gdcoFollowers, S.gdcoFollowers2023, S.steamWishlist] },
+  { id: "page-live", area: "timing", check: "auto", title: "Steam page is live early enough",
+    rule: "Wishlists only accumulate once a Coming Soon page is public. Valve asks you to submit the page for review at least 7 business days before you want it live, and the page must be live for at least 2 weeks before release. Put it up as early as you have a strong trailer, screenshots and text.",
+    sources: [S.steamComingSoon, S.pageLiveEarly] },
   { id: "timing-demo", area: "timing", check: "auto", title: "Has a demo before launch",
     rule: "Steam Next Fest requires a publicly playable demo by the time the festival begins. Release the demo well before the Fest rather than debuting it there.",
     sources: [S.steamNextFest, S.zukowskiNextFest] },
@@ -285,7 +293,7 @@ const ANY_GENRE_WORDS = Object.values(GENRE_WORDS).flat().filter((v, i, a) => a.
 const VAGUE_PHRASES = [
   "battle evil", "fight evil", "defeat evil", "save the world", "epic adventure", "epic journey", "like never before",
   "unique experience", "immersive experience", "unforgettable", "one of a kind", "a new kind of", "the ultimate",
-  "journey of a lifetime", "breathtaking", "an experience like no other",
+  "journey of a lifetime", "breathtaking", "an experience like no other", "a game about", "is a game",
 ];
 const FANTASY_RE = /\b(you|your|you're|you'll|yourself|as an?|become|play as|take on the role|step into|lead|command)\b/i;
 const VERB_RE = /\b(build|craft|explore|fight|shoot|slash|dodge|parry|draft|deck-?build|combine|merge|manage|grow|farm|cook|hunt|survive|scavenge|loot|sneak|race|drift|solve|match|stack|defend|command|lead|recruit|trade|sail|fly|dig|mine|upgrade|customi[sz]e|investigate|uncover|hack|jump|climb|raid|conquer|design|automate|breed|tame|befriend|date|escape|collect|battle|plan|outsmart|slay|blast|smash|brew|run|rebuild|restore|deliver|steal|rescue|shape|forge|cast|summon|place|route|deduce|wield|master|unlock|discover|defeat|dive|chain|sling)s?\b/i;
@@ -327,9 +335,18 @@ function stripHtml(s) {
 
 /** Tags as [{name, votes}] in order, whatever shape they came in. */
 export function toTags(tags) {
-  return arr(tags)
-    .map((t) => (typeof t === "string" ? { name: t, votes: null } : t && typeof t === "object" ? { name: str(t.name || t.tag || t.description), votes: num(t.votes ?? t.count) } : null))
-    .filter((t) => t && t.name.trim());
+  const list = typeof tags === "string" ? tags.split(",") : arr(tags);
+  const seen = new Set();
+  const out = [];
+  for (const t of list) {
+    const tag = typeof t === "string" ? { name: t.trim(), votes: null } : t && typeof t === "object" ? { name: str(t.name || t.tag || t.description).trim(), votes: num(t.votes ?? t.count) } : null;
+    if (!tag || !tag.name) continue;
+    const k = normalizeTag(tag.name);
+    if (seen.has(k)) continue; // first (highest-ranked) occurrence wins
+    seen.add(k);
+    out.push(tag);
+  }
+  return out;
 }
 
 /** Clean language names: strips markup, asterisks and footnotes. */
@@ -414,6 +431,46 @@ function genrePatternsForTag(tagName) {
   return [escaped];
 }
 
+/**
+ * Fills in a game from the corpus or from manual fields (a game with no Steam page yet).
+ * Manual fields accepted: name, shortDescription, aboutText, tags (strings or {name, votes}), genres,
+ * priceUSD, isFree, languages (array or comma string), screenshots (array or count) / screenshotCount,
+ * movies (count) / hasTrailer (bool), releaseDate, hasDemo, followers, earlyAccess.
+ */
+export function normalizeGame(game) {
+  const g = game && typeof game === "object" ? game : {};
+  const shotsArr = Array.isArray(g.screenshots) ? g.screenshots : null;
+  const screenshotCount = shotsArr ? shotsArr.length : num(g.screenshots) ?? num(g.screenshotCount) ?? 0;
+  const movies = num(g.movies) ?? (g.hasTrailer === true ? 1 : g.hasTrailer === false ? 0 : null);
+  const manual = g.manual === true || (g.appid == null && !str(g.url) && !str(g.headerImage));
+  const comingSoon = typeof g.comingSoon === "boolean" ? g.comingSoon : manual ? true : false;
+  const price = num(g.priceUSD);
+  return {
+    ...g,
+    name: str(g.name),
+    tags: toTags(g.tags),
+    genres: arr(g.genres).map(str).filter(Boolean),
+    shortDescription: stripHtml(g.shortDescription),
+    aboutText: stripHtml(g.aboutText),
+    languages: normalizeLanguages(g.languages),
+    fullAudioLanguages: normalizeLanguages(g.fullAudioLanguages),
+    screenshotCount,
+    movies,
+    priceUSD: price,
+    isFree: g.isFree === true || (price === 0 && g.isFree !== false && !comingSoon),
+    comingSoon,
+    manual,
+    hasDemo: typeof g.hasDemo === "boolean" ? g.hasDemo : null,
+    earlyAccess: g.earlyAccess === true,
+    reviews: g.reviews && typeof g.reviews === "object" ? g.reviews : { total: null, positivePct: null, scoreDesc: null },
+    followers: num(g.followers),
+  };
+}
+
+function shotCount(g) {
+  return Array.isArray(g?.screenshots) ? g.screenshots.length : num(g?.screenshots) ?? num(g?.screenshotCount) ?? 0;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Comparable games
 // ---------------------------------------------------------------------------------------------
@@ -452,18 +509,32 @@ export function successScore(game) {
   return round((owners ? 0.6 * r + 0.4 * o : r) * quality, 4);
 }
 
+const MEGA_REVIEWS = 50000;
+const MEGA_OWNERS = 5e6;
+
+/** "hit" (mega-hit), "indie" (proven: 50+ reviews), "small" (released, under 50 reviews), "upcoming". */
+export function scaleTier(game) {
+  if (game?.comingSoon) return "upcoming";
+  const reviews = num(game?.reviews?.total) ?? 0;
+  const owners = parseOwners(game?.ownersRange) ?? 0;
+  if (reviews >= MEGA_REVIEWS || owners >= MEGA_OWNERS) return "hit";
+  return reviews >= 50 ? "indie" : "small";
+}
+
 function sameGame(a, b) {
   if (a?.appid != null && b?.appid != null) return Number(a.appid) === Number(b.appid);
   return normalizeTag(a?.name) !== "" && normalizeTag(a?.name) === normalizeTag(b?.name);
 }
 
 /**
- * Comparable games by tag-weighted similarity (tag order, votes, rarity), genre overlap as a tiebreak,
- * then success-weighted. Returns [{ game, similarity, sharedTags, success, rank }].
+ * Comparable games by tag-weighted similarity (tag order, votes, rarity), genre overlap as a tiebreak.
+ * Hits, mid indies and upcoming games are all fair comparables: no size preference.
+ * Returns [{ game, similarity, sharedTags, success, tier, genreOverlap, rank }].
  */
-export function findComparables(game, corpus, { limit = 20 } = {}) {
+export function findComparables(gameIn, corpus, { limit = 20 } = {}) {
   const games = arr(corpus?.games ?? corpus).filter((g) => g && typeof g === "object");
-  if (!game || !games.length) return [];
+  if (!gameIn || typeof gameIn !== "object" || !games.length) return [];
+  const game = normalizeGame(gameIn);
   // Inverse document frequency over the corpus, so rare shared tags count more than "Indie".
   const df = new Map();
   for (const g of games) {
@@ -475,7 +546,6 @@ export function findComparables(game, corpus, { limit = 20 } = {}) {
   const target = tagVector(game, idf);
   if (!target.size) return [];
   const targetGenres = new Set(arr(game.genres).map(normalizeTag));
-  const targetTags = toTags(game.tags).map((t) => normalizeTag(t.name));
 
   const scored = [];
   for (const g of games) {
@@ -489,11 +559,12 @@ export function findComparables(game, corpus, { limit = 20 } = {}) {
     const success = successScore(g);
     const theirs = new Set(toTags(g.tags).slice(0, 20).map((t) => normalizeTag(t.name)));
     const sharedTags = toTags(game.tags).filter((t) => theirs.has(normalizeTag(t.name))).map((t) => t.name);
-    const rank = sim * (0.7 + 0.3 * success) + 0.02 * genreJ;
-    scored.push({ game: g, similarity: round(sim, 4), sharedTags, success, genreOverlap: round(genreJ, 4), rank: round(rank, 6) });
+    // Ranked purely by relevance: tag similarity, genre overlap as a small tiebreak. No size preference;
+    // `tier` and `success` are reported so the user can judge each comparable's scale.
+    const rank = sim + 0.02 * genreJ;
+    scored.push({ game: g, similarity: round(sim, 4), sharedTags, success, tier: scaleTier(g), genreOverlap: round(genreJ, 4), rank: round(rank, 6) });
   }
   scored.sort((a, b) => b.rank - a.rank || b.genreOverlap - a.genreOverlap || (Number(a.game.appid) || 0) - (Number(b.game.appid) || 0) || str(a.game.name).localeCompare(str(b.game.name)));
-  void targetTags;
   return scored.slice(0, Math.max(0, limit));
 }
 
@@ -543,7 +614,7 @@ export function computeBenchmarks(comparables) {
     medianPrice: median(paid.map((g) => g.priceUSD)),
     paidCount: paid.length,
     freeCount: comps.filter((g) => g.isFree).length,
-    medianScreenshots: median(comps.map((g) => arr(g.screenshots).length)),
+    medianScreenshots: median(comps.map(shotCount)),
     medianMovies: median(withMovies.map((g) => g.movies)),
     trailerShare: withMovies.length ? round(withMovies.filter((g) => g.movies > 0).length / withMovies.length, 3) : null,
     medianLanguages: median(comps.map((g) => normalizeLanguages(g.languages).length).filter((x) => x > 0)),
@@ -597,7 +668,8 @@ function outOf(count, n) {
  * Options: { now } (Date or ISO string) enables date-based Next Fest advice; without it the advice is undated.
  */
 export function diagnose(game, comparables, opts = {}) {
-  const g = game && typeof game === "object" ? game : {};
+  const g = normalizeGame(game);
+  const compEntries = arr(comparables).filter((c) => c && typeof c === "object");
   const comps = comparableGames(comparables).filter((c) => !sameGame(c, g));
   const n = comps.length;
   const b = computeBenchmarks(comps);
@@ -608,7 +680,7 @@ export function diagnose(game, comparables, opts = {}) {
   const tagKeys = tags.map((t) => normalizeTag(t.name));
   const short = stripHtml(g.shortDescription);
   const about = stripHtml(g.aboutText);
-  const shots = arr(g.screenshots).length;
+  const shots = g.screenshotCount;
   const movies = num(g.movies);
   const langs = normalizeLanguages(g.languages);
   const released = !g.comingSoon;
@@ -617,7 +689,9 @@ export function diagnose(game, comparables, opts = {}) {
   {
     const header = /^https:\/\//i.test(str(g.headerImage));
     const capsule = /^https:\/\//i.test(str(g.capsuleImage));
-    if (header && capsule) {
+    if (g.manual && !header && !capsule) {
+      checks.push(makeCheck("capsule-assets", "warn", "No Steam page data, so Page Doctor can't see your capsule images.", "Before the page goes live you need a header capsule (920x430), small capsule (462x174) and main capsule (1232x706). Budget for a capsule artist.", { manual: true }));
+    } else if (header && capsule) {
       checks.push(makeCheck("capsule-assets", "pass", "Header and main capsule images are uploaded. Page Doctor can't judge the art itself; see the manual capsule check.", "Keep them; review legibility with the manual check below."));
     } else if (header || capsule) {
       checks.push(makeCheck("capsule-assets", "warn", `Only the ${header ? "header" : "main"} capsule was found in the store data.`, "Upload every required capsule size in Steamworks (header 920x430, small 462x174, main 1232x706)."));
@@ -934,22 +1008,35 @@ export function diagnose(game, comparables, opts = {}) {
       }
     }
     const followers = num(g.followers);
-    if (followers != null) {
-      const peers = comps.filter((c) => c.comingSoon && num(c.followers) != null);
-      const usePeers = !released && peers.length >= 3;
-      const med = usePeers ? median(peers.map((c) => c.followers)) : b.medianFollowers;
-      const decades = released || usePeers ? 1.5 : 2.5; // unreleased vs released hits: judge more gently
+    if (released && followers != null) {
+      const med = b.medianFollowers;
       const r = ratioScore(followers, med);
-      const est = !released ? ` That suggests roughly ${fmtInt(followers * 10)}-${fmtInt(followers * 12)} wishlists (GameDiscoverCo: unreleased games median 10-12x followers).` : "";
       if (r == null) {
-        checks.push(makeCheck("followers", "warn", `${fmtInt(followers)} followers. No comparable data.${est}`, "Grow followers with a demo, festivals and creator coverage.", { weight: 0 }));
+        checks.push(makeCheck("followers", "warn", `${fmtInt(followers)} followers. No comparable data.`, "Post regular updates and events; followers get notified.", { weight: 0 }));
       } else {
-        const rr = clamp01(1 + Math.log10(Math.max(followers, 0.5) / med) / decades);
-        const st = rr >= 0.7 ? "pass" : rr >= 0.35 ? "warn" : "fail";
+        const st = r >= 0.7 ? "pass" : r >= 0.35 ? "warn" : "fail";
         checks.push(makeCheck("followers", st,
-          `${fmtInt(followers)} followers; ${usePeers ? "unreleased " : ""}comparable games median ${fmtInt(med)}.${est}`,
-          released ? "Followers get update notifications: post regular updates and events to keep them engaged." : "Build wishlists before launch: a demo, Steam festivals, Next Fest, and creators who cover your genre.",
-          { weight: released ? 0.7 : 1, score: rr }));
+          `${fmtInt(followers)} followers; comparable games median ${fmtInt(med)}.`,
+          "Followers get update notifications: post regular updates and events to keep them engaged.",
+          { weight: 0.7, score: r }));
+      }
+    } else if (!released) {
+      // Pre-launch: no reviews yet, so wishlists are the social proof. Never a fail: it's early.
+      const peers = comps.filter((c) => c.comingSoon && num(c.followers) != null);
+      if (followers != null) {
+        const est = `roughly ${fmtInt(followers * 10)}-${fmtInt(followers * 12)} wishlists (unreleased games median 10-12x followers, GameDiscoverCo)`;
+        const peerMed = peers.length >= 3 ? median(peers.map((c) => c.followers)) : null;
+        const r = peerMed != null ? ratioScore(followers, peerMed) : null;
+        const st = r == null ? "pass" : r >= 0.7 ? "pass" : "warn";
+        checks.push(makeCheck("wishlist-readiness", st,
+          `${fmtInt(followers)} followers suggests ${est}.${peerMed != null ? ` Upcoming comparable games median ${fmtInt(peerMed)} followers.` : ""}`,
+          "Grow wishlists before launch: release a demo, enter Steam festivals and Next Fest, and get creators in your genre to play it. Check the real count in Steamworks' wishlist reports.",
+          { weight: r == null ? 0 : 0.7, score: r == null ? null : Math.max(0.5, r) }));
+      } else {
+        checks.push(makeCheck("wishlist-readiness", "warn",
+          g.manual ? "Pre-launch: no Steam page yet, so no wishlists or followers to measure." : "Pre-launch: follower count unknown, so wishlist momentum can't be estimated.",
+          "Wishlists are your social proof before launch. Once the page is live, watch Steamworks' wishlist reports weekly and push them with a demo, festivals and creator coverage.",
+          { manual: true }));
       }
     }
   }
@@ -958,6 +1045,21 @@ export function diagnose(game, comparables, opts = {}) {
   {
     const demoComps = b.demoShare != null && n ? ` ${Math.round(b.demoShare * 100)}% of comparable games have a demo.` : "";
     if (!released) {
+      const relDate = parseReleaseDate(g.releaseDate);
+      const daysToRelease = now && relDate ? Math.round((relDate.getTime() - now.getTime()) / DAY) : null;
+      if (g.manual) {
+        const urgent = daysToRelease != null && daysToRelease < 60;
+        checks.push(makeCheck("page-live", urgent ? "fail" : "warn",
+          `No Steam page yet, so you are not collecting wishlists.${daysToRelease != null ? ` Your release date is ${daysToRelease} days away.` : ""}`,
+          "Submit a Coming Soon page for review at least 7 business days before you want it public; it must be live at least 2 weeks before release, and every week it's live earlier collects more wishlists. Go live as soon as you have a strong trailer, 5+ screenshots and a sharp short description.",
+          { weight: 1.5, score: urgent ? 0 : 0.4 }));
+      } else {
+        const tooLate = daysToRelease != null && daysToRelease < 14;
+        checks.push(makeCheck("page-live", tooLate ? "warn" : "pass",
+          `Your Coming Soon page is live${daysToRelease != null ? ` and your release date is ${daysToRelease} days away` : ""}.${tooLate ? " Steam requires the page to be live for at least 2 weeks before release." : ""}`,
+          tooLate ? "Check in Steamworks that the page has been public for 2+ weeks, or move the release date." : "Keep the page fresh with announcements; every event post notifies followers.",
+          { weight: 1 }));
+      }
       if (g.hasDemo === true) {
         checks.push(makeCheck("timing-demo", "pass", "You have a demo." + demoComps, "Keep it updated; it's your best wishlist driver before launch.", { weight: 1 }));
       } else {
@@ -965,7 +1067,7 @@ export function diagnose(game, comparables, opts = {}) {
           "Ship a short, polished demo well before your Next Fest, so you go in with wishlists and feedback instead of debuting there.", { weight: 1, score: g.hasDemo === false ? 0.3 : 0.5 }));
       }
       const fest = now ? NEXT_FESTS.map((f) => ({ ...f, s: toDate(f.start), e: toDate(f.end) })).find((f) => f.e && f.e.getTime() >= now.getTime()) : null;
-      const rel = parseReleaseDate(g.releaseDate);
+      const rel = relDate;
       if (!now) {
         checks.push(makeCheck("timing-next-fest", "warn",
           "Each game can do only one Steam Next Fest; Zukowski advises the last one before launch.",
@@ -984,8 +1086,10 @@ export function diagnose(game, comparables, opts = {}) {
             "If you haven't done a Next Fest yet, consider whether moving launch after it is worth the extra wishlists. A game can only take part once.",
             { weight: 0.5 }));
         } else {
+          const monthsAfter = rel ? Math.round((rel.getTime() - fest.e.getTime()) / (30.4 * DAY)) : null;
+          const later = monthsAfter != null && monthsAfter > 5 ? ` Your launch is about ${monthsAfter} months after it; Valve usually runs Next Fest in February, June and October, so a later one may be your last before launch.` : "";
           checks.push(makeCheck("timing-next-fest", g.hasDemo ? "pass" : "warn",
-            `${fest.name} ${when}. Submit your demo for review by ${fmtDate(submitBy)}; release it by ${fmtDate(pressBy)} for the Press Preview.`,
+            `${fest.name} ${when}. To enter it, submit your demo for review by ${fmtDate(submitBy)} and release it by ${fmtDate(pressBy)} for the Press Preview.${later}`,
             "Register in Steamworks, have the store page public, and line up creators to play the demo during the Fest. You get one Next Fest per game: make it the last one before launch.",
             { weight: 0.5, score: g.hasDemo ? 1 : 0.5 }));
         }
@@ -1015,7 +1119,17 @@ export function diagnose(game, comparables, opts = {}) {
     checks,
     tagSuggestions,
     benchmarks: b,
-    comparables: comps.slice(0, 20).map((c) => ({ appid: c.appid ?? null, name: str(c.name), url: str(c.url) })),
+    comparables: comps.slice(0, 20).map((c) => {
+      const entry = compEntries.find((e) => e.game === c);
+      return {
+        appid: c.appid ?? null, name: str(c.name), url: str(c.url),
+        similarity: entry?.similarity ?? null, sharedTags: entry?.sharedTags ?? [],
+        tier: scaleTier(c), reviews: num(c.reviews?.total), positivePct: num(c.reviews?.positivePct),
+        followers: num(c.followers), ownersRange: c.ownersRange ?? null, priceUSD: num(c.priceUSD), comingSoon: !!c.comingSoon,
+      };
+    }),
+    prelaunch: !released,
+    manual: g.manual,
     rewritePrompt: "",
   };
   diagnosis.rewritePrompt = buildRewritePrompt(g, diagnosis, comps);
@@ -1130,10 +1244,8 @@ function buildRewritePrompt(game, diagnosis, comps) {
  * Returns { system, user, model, max_tokens }.
  */
 export function rewriteRequest(game, diagnosis) {
-  const g = game && typeof game === "object" ? game : {};
+  const g = normalizeGame(game);
   const d = diagnosis && typeof diagnosis === "object" ? diagnosis : diagnose(g, []);
-  const comps = arr(d.comparables).length && arr(d._comps).length ? d._comps : null;
-  void comps;
   const system = [
     ROLE,
     "",
