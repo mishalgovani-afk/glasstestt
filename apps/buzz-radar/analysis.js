@@ -417,9 +417,11 @@ function detectBursts(buckets, size, posts) {
 // ---------------------------------------------------------------------------------------------
 // Step 4: clustering
 
-const SIM_THRESHOLD = 0.22;
+const SIM_THRESHOLD = 0.15;
 const MERGE_THRESHOLD = 0.45;          // centroid cosine to merge groups within W/2 of each other
 const MERGE_THRESHOLD_OVERLAP = 0.25;  // ... or a looser one when their time ranges overlap
+const MERGE_THRESHOLD_MOMENT = 0.08;   // ... or a loose one when they mostly share the same hours and
+                                       //     disclosure rate (reactions to one moment use mixed words)
 const MAX_CLUSTERS = 12;
 
 function vectorize(posts) {
@@ -488,12 +490,16 @@ function clusterPosts(posts, vecs, spanMs) {
     merged = false;
     const cents = groups.map((g) => centroid(g, vecs));
     const ranges = groups.map((g) => [Math.min(...g.map((k) => posts[k].t)), Math.max(...g.map((k) => posts[k].t))]);
+    const disc = groups.map((g) => g.filter((k) => posts[k].disc.disclosed).length / g.length);
     outer: for (let a = 0; a < groups.length; a++) {
       for (let b = a + 1; b < groups.length; b++) {
         const gap = Math.max(0, Math.max(ranges[a][0], ranges[b][0]) - Math.min(ranges[a][1], ranges[b][1]));
         const cos = dot(cents[a], cents[b]);
         const overlap = Math.min(ranges[a][1], ranges[b][1]) - Math.max(ranges[a][0], ranges[b][0]);
-        if ((gap <= W / 2 && cos >= MERGE_THRESHOLD) || (overlap >= 0 && cos >= MERGE_THRESHOLD_OVERLAP)) {
+        const shorter = Math.max(HOUR, Math.min(ranges[a][1] - ranges[a][0], ranges[b][1] - ranges[b][0]));
+        const sameMoment = overlap >= 0.5 * shorter && Math.abs(disc[a] - disc[b]) < 0.25;
+        if ((gap <= W / 2 && cos >= MERGE_THRESHOLD) || (overlap >= 0 && cos >= MERGE_THRESHOLD_OVERLAP)
+          || (sameMoment && cos >= MERGE_THRESHOLD_MOMENT)) {
           groups[a] = groups[a].concat(groups[b]);
           groups.splice(b, 1);
           merged = true;
@@ -630,7 +636,7 @@ function campaignScore(sig, creators) {
 }
 
 /** Rules, checked in order. Returns { archetype, family } (family = keyword family that fired). */
-function archetypeFor(sig, score, fam, streamShare) {
+function archetypeFor(sig, score, fam, streamShare, n) {
   const top = Object.entries(fam).filter(([k]) => k !== "controversy").sort((a, b) => b[1] - a[1])[0];
   const paidEvidence = sig.disclosure >= 0.35 || (sig.disclosure >= 0.2 && score >= 60);
   if (fam.controversy >= 0.3 && sig.disclosure < 0.3) return { archetype: "controversy", family: "controversy" };
@@ -648,7 +654,8 @@ function archetypeFor(sig, score, fam, streamShare) {
     return { archetype: map[top[0]], family: top[0] };
   }
   if (score >= 60) return { archetype: streamShare >= 0.5 ? "streamer-sponsorship" : "sponsored-creator-wave", family: null };
-  if (sig.engagementSkew >= 0.4 || sig.synchronicity >= 0.35) return { archetype: "organic-viral", family: null };
+  // Organic viral: attention concentrated on a few posts and bunched in time, or a big tight swarm.
+  if ((sig.engagementSkew >= 0.4 && sig.synchronicity >= 0.3) || (sig.synchronicity >= 0.55 && n >= 8)) return { archetype: "organic-viral", family: null };
   return { archetype: "background-chatter", family: null };
 }
 
@@ -741,7 +748,7 @@ function analyzeCluster(id, members, ctx, isBackground) {
 
   let archetype, family;
   if (isBackground) { archetype = "background-chatter"; family = null; score = Math.min(score, 40); }
-  else ({ archetype, family } = archetypeFor(signals, score, fam, streamShare));
+  else ({ archetype, family } = archetypeFor(signals, score, fam, streamShare, n));
 
   const keywords = keywordsFor(members, df, N, gameSet);
   const sponsor = topSponsor(members);

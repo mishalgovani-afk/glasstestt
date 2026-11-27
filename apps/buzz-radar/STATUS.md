@@ -11,9 +11,10 @@ Shared by Claude Code and Codex. Before you edit a file, check the Owner column.
 | File | What | Owner now | State |
 |---|---|---|---|
 | `sources.js`, `demo-data.js`, `tests/sources.test.mjs` | Platform connectors and demo data | Claude agent A | v1 done (10/10 tests). Adding Apify (TikTok/IG/X/FB), Reddit RSS fallback, ad-library links |
-| `analysis.js`, `tests/analysis.test.mjs` | Burst detection, clustering, paid-push scoring | Claude agent B | In progress, not landed yet |
+| `analysis.js`, `tests/analysis.test.mjs` | Burst detection, clustering, paid-push scoring | Claude agent B | Landed (936 lines), tests pending |
 | `index.html`, `styles.css`, `app.js` | UI | Claude agent C | v1 done. Adding Apify token group, cost estimate, ad-library panel |
-| `playbook.js`, `README.md`, `tests/playbook.test.mjs` | Media-buying teaching content | Claude agent D | In progress |
+| `playbook.js`, `README.md`, `tests/playbook.test.mjs` | Media-buying teaching content | free | Done: 9 archetypes, 31 terms, 9 lessons, 20 disclosure patterns (8/8 tests). Sources were read through search excerpts only, because page fetches were blocked |
+| `MEDIA-BUYING-BRIEF.md` | ~1,300-word sourced learning brief for the user | free | Done |
 | Root `index.html`, root `README.md` | Launcher card and table row | Claude (orchestrator) | Done |
 
 ## Open tasks (free for anyone to claim)
@@ -30,3 +31,4 @@ Shared by Claude Code and Codex. Before you edit a file, check the Owner column.
 ## Log
 - 2026-11-27 Claude: contract written, 4 agents started (A connectors / Sonnet, B engine / Opus, C UI / Sonnet, D research / Opus). Launcher card and README row added.
 - 2026-11-27 Claude: A v1 and C v1 landed. Scope expanded to TikTok/IG/X/FB through Apify's free tier, plus ad libraries.
+- 2026-11-27 Claude: D done (playbook, README draft, brief). A's tests at 14/14. B's analysis.js landed.

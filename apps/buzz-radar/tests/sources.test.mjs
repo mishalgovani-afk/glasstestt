@@ -100,3 +100,42 @@ test("demoPosts shape, count, determinism", () => {
   assert.ok(a.every((p) => !p.text.includes("<") ));
   assert.ok(a.some((p) => p.title.includes("Starfall Odyssey")));
 });
+
+test("apify: tiktok / instagram / x / facebook normalizers", () => {
+  const t = S.normalizeTikTok({ id: "7300", text: "Trying it #ad #Game", createTimeISO: "2026-11-20T10:00:00.000Z", authorMeta: { name: "bob", nickName: "Bob", fans: 5000 }, diggCount: 10, playCount: 900, commentCount: 2, shareCount: 1, hashtags: [{ name: "Game" }], webVideoUrl: "https://www.tiktok.com/@bob/video/7300", textLanguage: "en" });
+  checkShape(t); assert.equal(t.kind, "short"); assert.equal(t.authorFollowers, 5000); assert.deepEqual(t.tags, ["game", "ad"]); assert.equal(t.metrics.views, 900);
+  const i = S.normalizeInstagram({ shortCode: "Cxyz", caption: "Look #gaming", hashtags: ["gaming"], likesCount: 12, commentsCount: 1, timestamp: "2026-11-20T10:00:00.000Z", ownerUsername: "amy", ownerFullName: "Amy", url: "https://www.instagram.com/p/Cxyz/", type: "Image" });
+  checkShape(i); assert.equal(i.id, "instagram:Cxyz"); assert.equal(i.kind, "post"); assert.equal(i.authorId, "amy");
+  const x = S.normalizeX({ id: "1", url: "https://x.com/a/status/1", text: "Hello #Game", createdAt: "Thu Nov 20 10:00:00 +0000 2026", likeCount: 3, replyCount: 1, viewCount: 400, lang: "en", author: { userName: "a", name: "A", followers: 321 } });
+  checkShape(x); assert.equal(x.authorFollowers, 321); assert.equal(x.metrics.views, 400); assert.equal(x.publishedAt, "2026-11-20T10:00:00.000Z");
+  assert.equal(S.normalizeX({ id: "2", type: "mock_tweet" }), null);
+  const f = S.normalizeFacebook({ postId: "55", text: "Check it out #game", url: "https://facebook.com/p/55", author: { name: "Page", id: "9" }, timestamp: 1790000000, likes: 7, comments: 2 });
+  checkShape(f); assert.equal(f.metrics.likes, 7); assert.equal(f.authorId, "9");
+});
+
+test("apify key group, cost estimate, inputs", () => {
+  const ids = S.SOURCES.filter((s) => s.keyGroup === "apify").map((s) => s.id);
+  assert.deepEqual(ids, ["tiktok", "instagram", "x", "facebook"]);
+  assert.equal(S.KEY_GROUPS.apify.keyFields[0].name, "token");
+  const src = S.SOURCES.find((s) => s.id === "x");
+  assert.equal(S.isRunnable(src, {}), false);
+  assert.equal(S.isRunnable(src, { apify: { token: "t" } }), true);
+  const c = S.estimateApifyCostUSD(100); assert.ok(c > 0.3 && c < 1);
+  assert.equal(S.apifyInput("instagram", "Elden Ring", { limit: 50 }).hashtags[0], "eldenring");
+  assert.match(S.apifyInput("x", "Elden Ring").searchTerms[0], /^"Elden Ring" since:\d{4}-\d\d-\d\d$/);
+});
+
+test("reddit atom fallback parser (regex path in Node)", () => {
+  const xml = `<?xml version="1.0"?><feed><entry><author><name>/u/zed</name></author><category term="Games" label="r/Games"/><content type="html">&lt;p&gt;Body &amp;amp; more&lt;/p&gt; submitted by &lt;a&gt; /u/zed &lt;/a&gt;</content><id>t3_abc12</id><link href="https://www.reddit.com/r/Games/comments/abc12/title/"/><updated>2026-11-20T10:00:00+00:00</updated><title>Big &amp; News</title></entry></feed>`;
+  const [c] = S.parseRedditAtom(xml);
+  assert.equal(c.data.id, "abc12"); assert.equal(c.data.author, "zed"); assert.equal(c.data.subreddit, "Games");
+  const p = S.normalizeReddit(c); checkShape(p);
+  assert.equal(p.id, "reddit:abc12"); assert.equal(p.title, "Big & News"); assert.equal(p.url, "https://www.reddit.com/r/Games/comments/abc12/title/");
+});
+
+test("adLibraryLinks", () => {
+  const l = S.adLibraryLinks("Elden Ring", "Bandai Namco");
+  assert.equal(l.length, 5);
+  assert.ok(l.every((x) => x.url.startsWith("https://") && x.name && x.note));
+  assert.ok(l[1].url.includes("q=Elden%20Ring"));
+});

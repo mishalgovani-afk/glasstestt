@@ -371,6 +371,135 @@ async function hnSearch(game, sinceDays, signal) {
   return (j.hits || []).map(normalizeHN);
 }
 
+// ---------- Apify-backed sources (TikTok, Instagram, X, Facebook) ----------
+// One Apify token, run-sync-get-dataset-items. api.apify.com sends CORS headers (documented for browser use).
+// Prices are USD per 1,000 results as listed on the Apify Store (late 2026); they change - the UI should say "about".
+export const APIFY_ACTORS = {
+  tiktok: { label: "TikTok", actor: "clockworks~tiktok-scraper", pricePer1k: 1.7, minPer1k: 1.7 },
+  instagram: { label: "Instagram", actor: "apify~instagram-hashtag-scraper", pricePer1k: 2.3 },
+  x: { label: "X (Twitter)", actor: "apidojo~tweet-scraper", pricePer1k: 0.4 },
+  facebook: { label: "Facebook", actor: "dami_studio~facebook-search-scraper", pricePer1k: 0.46 },
+};
+
+export const KEY_GROUPS = {
+  apify: {
+    name: "Apify (TikTok, Instagram, X, Facebook)",
+    keyFields: [{ name: "token", label: "Apify API token",
+      help: "Create a free account at apify.com (no card; $5 of free usage credit renews monthly), then Settings > API & Integrations > copy your Personal API token. One search of ~100 results per platform costs roughly $0.4-0.5 in total, so the credit covers about 10 full searches a month.",
+      url: "https://console.apify.com/settings/integrations" }],
+  },
+};
+
+/** Approximate USD for one full search across all four Apify platforms at `limitPerSource` results each. */
+export function estimateApifyCostUSD(limitPerSource = 100, ids = Object.keys(APIFY_ACTORS)) {
+  const total = ids.reduce((s, id) => s + (APIFY_ACTORS[id].pricePer1k * limitPerSource) / 1000, 0);
+  return Math.round(total * 1000) / 1000;
+}
+
+const first = (...v) => v.find((x) => x !== undefined && x !== null && x !== "");
+const tagNames = (arr) => (Array.isArray(arr) ? arr.map((t) => (typeof t === "string" ? t : t?.name || t?.hashtag || t?.text)) : []);
+
+/** clockworks/tiktok-scraper item (authorMeta nested; flat variants tolerated) */
+export function normalizeTikTok(v) {
+  if (!v?.id) return null;
+  const am = v.authorMeta || {};
+  const text = stripHtml(v.text || v.desc || "");
+  const author = first(am.nickName, am.name, v.nickname, v.username, "");
+  const uid = first(am.name, am.id, v.username, author);
+  const t = v.createTimeISO || (v.createTime ? (v.createTime > 1e12 ? v.createTime : v.createTime * 1000) : null);
+  return mkPost({
+    id: `tiktok:${v.id}`, source: "tiktok", kind: "short",
+    url: v.webVideoUrl || (uid ? `https://www.tiktok.com/@${uid}/video/${v.id}` : `https://www.tiktok.com/video/${v.id}`),
+    title: "", text, author, authorId: uid, authorFollowers: first(am.fans, v.fans),
+    publishedAt: iso(t),
+    metrics: { views: first(v.playCount, v.plays), likes: first(v.diggCount, v.likes), comments: first(v.commentCount, v.comments), viewers: null },
+    tags: [...tagNames(v.hashtags), ...extractHashtags(text)], lang: v.textLanguage || null,
+  });
+}
+
+/** apify/instagram-hashtag-scraper item */
+export function normalizeInstagram(v) {
+  const id = first(v.shortCode, v.id);
+  if (!id) return null;
+  const text = stripHtml(v.caption || "");
+  return mkPost({
+    id: `instagram:${id}`, source: "instagram", kind: v.type === "Video" || v.productType === "clips" ? "short" : "post",
+    url: v.url || `https://www.instagram.com/p/${id}/`, title: "", text,
+    author: first(v.ownerFullName, v.ownerUsername, ""), authorId: first(v.ownerUsername, v.ownerId),
+    authorFollowers: first(v.ownerFollowersCount, v.followersCount), publishedAt: iso(v.timestamp),
+    metrics: { views: first(v.videoViewCount, v.videoPlayCount), likes: v.likesCount >= 0 ? v.likesCount : null, comments: v.commentsCount, viewers: null },
+    tags: [...tagNames(v.hashtags), ...extractHashtags(text)], lang: null,
+  });
+}
+
+/** apidojo/tweet-scraper item */
+export function normalizeX(v) {
+  if (!v?.id || v.type === "mock_tweet") return null;
+  const a = v.author || {};
+  const text = stripHtml(v.fullText || v.text || "");
+  return mkPost({
+    id: `x:${v.id}`, source: "x", kind: "post", url: v.url || v.twitterUrl || `https://x.com/i/status/${v.id}`,
+    title: "", text, author: first(a.name, a.userName, ""), authorId: first(a.userName, a.id),
+    authorFollowers: first(a.followers, a.followersCount), publishedAt: iso(v.createdAt),
+    metrics: { views: v.viewCount, likes: v.likeCount, comments: v.replyCount, viewers: null },
+    tags: [...tagNames(v.entities?.hashtags), ...extractHashtags(text)], lang: v.lang || null,
+  });
+}
+
+/** Facebook search actors vary; accept the common field spellings. */
+export function normalizeFacebook(v) {
+  const id = first(v.postId, v.post_id, v.id);
+  if (!id) return null;
+  const a = v.author || v.user || {};
+  const text = stripHtml(first(v.text, v.message, v.content, ""));
+  const t = first(v.timestamp && (v.timestamp > 1e12 ? v.timestamp : v.timestamp * 1000), v.time, v.date, v.publishedAt, v.createdAt);
+  return mkPost({
+    id: `facebook:${id}`, source: "facebook", kind: "post", url: first(v.url, v.postUrl, v.link, `https://www.facebook.com/${id}`),
+    title: "", text, author: first(a.name, v.authorName, v.pageName, v.author_name, typeof v.author === "string" ? v.author : "", ""),
+    authorId: first(a.id, v.authorId, v.pageId, a.name, v.pageName), authorFollowers: first(a.followers, v.pageFollowers, v.followers),
+    publishedAt: iso(t),
+    metrics: { views: first(v.viewsCount, v.views), likes: first(v.likes, v.reactionsCount, v.reactions_count, v.reactions), comments: first(v.comments, v.commentsCount, v.comments_count), viewers: null },
+    tags: extractHashtags(text), lang: null,
+  });
+}
+
+const APIFY_NORMALIZERS = { tiktok: normalizeTikTok, instagram: normalizeInstagram, x: normalizeX, facebook: normalizeFacebook };
+
+/** Build the actor input for each platform. Exported for tests. */
+export function apifyInput(id, game, { sinceDays = 30, limit = 100 } = {}) {
+  const tag = gameTag(game);
+  const since = new Date(Date.now() - sinceDays * DAY).toISOString().slice(0, 10);
+  switch (id) {
+    case "tiktok": return { searchQueries: [game], hashtags: tag ? [tag] : [], resultsPerPage: limit, searchSection: "/video", shouldDownloadVideos: false, shouldDownloadCovers: false, shouldDownloadSubtitles: false };
+    case "instagram": return { hashtags: [tag], resultsType: "posts", resultsLimit: limit };
+    case "x": return { searchTerms: [`"${game}" since:${since}`], sort: "Latest", maxItems: limit };
+    case "facebook": return { query: game, search_query: game, maxPosts: limit, max_posts: limit, maxItems: limit, recent_posts: true };
+    default: throw new Error("unknown apify source " + id);
+  }
+}
+
+async function apifySearch(id, game, { keys, sinceDays, signal, limit }) {
+  const cap = Math.min(limit || 100, 100); // free plan: 100 results/run; keeps cost in cents
+  const a = APIFY_ACTORS[id];
+  const url = `https://api.apify.com/v2/acts/${a.actor}/run-sync-get-dataset-items?${qs({ token: keys.token.trim(), timeout: 120, maxItems: cap, format: "json", clean: 1 })}`;
+  const items = await getJson(url, { signal, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(apifyInput(id, game, { sinceDays, limit: cap })), timeout: 135000 });
+  if (!Array.isArray(items)) throw new Error("unexpected Apify response");
+  return items.map(APIFY_NORMALIZERS[id]).filter(Boolean);
+}
+
+// ---------- ad-library deep links (no login needed to open) ----------
+export function adLibraryLinks(game, publisher) {
+  const q = encodeURIComponent(game), pq = publisher ? encodeURIComponent(publisher) : null;
+  const links = [
+    { name: "Meta Ad Library (Facebook + Instagram ads)", url: `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=${q}&search_type=keyword_unordered&media_type=all`, note: "Every active ad on Meta platforms, with start dates and creatives. Search the game, then the publisher." },
+    { name: "Google Ads Transparency Center", url: `https://adstransparency.google.com/?region=anywhere&query=${q}`, note: "Search ads on Google, YouTube and Display by advertiser name or domain; if the keyword is not applied, paste the publisher name in the search box." },
+    { name: "TikTok Commercial Content Library", url: `https://library.tiktok.com/ads?region=all&adType=all&query=${q}`, note: "Ads shown in the EU/EEA, UK and Switzerland since Oct 2022. No account needed; the query parameter may need to be retyped in the page." },
+    { name: "TikTok Creative Center - Top Ads", url: `https://ads.tiktok.com/business/creativecenter/inspiration/topads/pc/en?keyword=${q}`, note: "Curated high-performing TikTok ads by region and industry (try the Gaming category); keyword prefill is not guaranteed." },
+  ];
+  if (pq) links.unshift({ name: `Meta Ad Library: ${publisher}`, url: `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=${pq}&search_type=keyword_unordered&media_type=all`, note: "Publisher-name search, to see all of the studio's ads." });
+  return links;
+}
+
 // ---------- registry ----------
 export const SOURCES = [
   {

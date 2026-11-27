@@ -119,7 +119,7 @@ function isRunnable(src) {
 }
 function needKeyLabel(src) {
   if (!src?.keyGroup) return "needs key";
-  const g = String(KEY_GROUPS[src.keyGroup]?.name || src.keyGroup).replace(/\s+(token|key)$/i, "");
+  const g = String(KEY_GROUPS[src.keyGroup]?.name || src.keyGroup).split(/[\s(]/)[0];
   return `needs ${g} token`;
 }
 
@@ -821,7 +821,7 @@ function renderSettings() {
     const costText = cost == null ? null : `≈ ${cost < 0.01 ? "<$0.01" : "$" + cost.toFixed(2)} per search, free plan includes $5/month.`;
     return el("section", { class: "card set-src" },
       el("fieldset", {},
-        el("legend", { text: `${g.name || gid} (one key for ${users.length ? users.join(", ") : "several platforms"})` }),
+        el("legend", { text: g.name || gid }),
         el("p", { class: "sec-note", text: `Shared by ${users.join(", ") || "several sources"}. Enter it once here.` }),
         (g.keyFields || []).map((f) => fieldRow(gid, f)),
         costText ? el("p", { class: "cost", text: costText }) : null));
