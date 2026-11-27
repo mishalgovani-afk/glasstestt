@@ -523,15 +523,47 @@ export function scaleTier(game) {
   return reviews >= 50 ? "indie" : "small";
 }
 
+// Scale on a log10(reviews) axis. Owners stand in when reviews are missing (roughly 1 review per 50 owners).
+function scaleLog(game) {
+  const reviews = num(game?.reviews?.total);
+  if (reviews != null) return Math.log10(1 + reviews);
+  const owners = parseOwners(game?.ownersRange);
+  return owners ? Math.log10(1 + owners / 50) : null;
+}
+
+// Target scale: released games use their own size, but never below a successful indie (~1,000 reviews),
+// so a small or unreleased game is benchmarked against indies that made it in its niche.
+const INDIE_SUCCESS_LOG = 3;
+
+/**
+ * 0..1: how well a comparable matches the target's scale and scope. Indies get successful indies and upcoming
+ * games in their niche; big titles get big titles. Mega-hits stay eligible but rank below closer-sized peers.
+ */
+export function scaleFit(comp, target) {
+  const targetReleased = !(target?.comingSoon || target?.manual);
+  const tLog = Math.max(INDIE_SUCCESS_LOG, (targetReleased ? scaleLog(target) : null) ?? INDIE_SUCCESS_LOG);
+  if (comp?.comingSoon) {
+    if (!targetReleased) return 0.85;
+    return tLog >= Math.log10(MEGA_REVIEWS) ? 0.3 : 0.6;
+  }
+  const cLog = scaleLog(comp);
+  if (cLog == null) return 0.5;
+  const distance = Math.abs(cLog - tLog);
+  const fit = clamp01(1 - Math.max(0, distance - 1) / 1.5); // within 10x of the target: full fit
+  const proven = num(comp?.reviews?.total) == null || comp.reviews.total >= 50 ? 1 : 0.6; // under 50 reviews: unproven
+  return round(fit * proven, 4);
+}
+
 function sameGame(a, b) {
   if (a?.appid != null && b?.appid != null) return Number(a.appid) === Number(b.appid);
   return normalizeTag(a?.name) !== "" && normalizeTag(a?.name) === normalizeTag(b?.name);
 }
 
 /**
- * Comparable games by tag-weighted similarity (tag order, votes, rarity), genre overlap as a tiebreak.
- * Hits, mid indies and upcoming games are all fair comparables: no size preference.
- * Returns [{ game, similarity, sharedTags, success, tier, genreOverlap, rank }].
+ * Comparable games: same niche (tag-weighted similarity using tag order, votes and rarity; genre overlap as a
+ * tiebreak) and similar scale (scaleFit: an indie or unreleased game gets successful indies and upcoming games
+ * in its niche, a big title gets big titles). Similarity dominates; scale reorders games of similar relevance.
+ * Returns [{ game, similarity, sharedTags, success, tier, scaleFit, genreOverlap, rank }].
  */
 export function findComparables(gameIn, corpus, { limit = 20 } = {}) {
   const games = arr(corpus?.games ?? corpus).filter((g) => g && typeof g === "object");
@@ -561,10 +593,9 @@ export function findComparables(gameIn, corpus, { limit = 20 } = {}) {
     const success = successScore(g);
     const theirs = new Set(toTags(g.tags).slice(0, 20).map((t) => normalizeTag(t.name)));
     const sharedTags = toTags(game.tags).filter((t) => theirs.has(normalizeTag(t.name))).map((t) => t.name);
-    // Ranked purely by relevance: tag similarity, genre overlap as a small tiebreak. No size preference;
-    // `tier` and `success` are reported so the user can judge each comparable's scale.
-    const rank = sim + 0.02 * genreJ;
-    scored.push({ game: g, similarity: round(sim, 4), sharedTags, success, tier: scaleTier(g), genreOverlap: round(genreJ, 4), rank: round(rank, 6) });
+    const fit = scaleFit(g, game);
+    const rank = sim * (0.6 + 0.4 * fit) + 0.02 * genreJ;
+    scored.push({ game: g, similarity: round(sim, 4), sharedTags, success, tier: scaleTier(g), scaleFit: fit, genreOverlap: round(genreJ, 4), rank: round(rank, 6) });
   }
   scored.sort((a, b) => b.rank - a.rank || b.genreOverlap - a.genreOverlap || (Number(a.game.appid) || 0) - (Number(b.game.appid) || 0) || str(a.game.name).localeCompare(str(b.game.name)));
   return scored.slice(0, Math.max(0, limit));
@@ -1125,7 +1156,7 @@ export function diagnose(game, comparables, opts = {}) {
       const entry = compEntries.find((e) => e.game === c);
       return {
         appid: c.appid ?? null, name: str(c.name), url: str(c.url),
-        similarity: entry?.similarity ?? null, sharedTags: entry?.sharedTags ?? [],
+        similarity: entry?.similarity ?? null, scaleFit: entry?.scaleFit ?? null, sharedTags: entry?.sharedTags ?? [],
         tier: scaleTier(c), reviews: num(c.reviews?.total), positivePct: num(c.reviews?.positivePct),
         followers: num(c.followers), ownersRange: c.ownersRange ?? null, priceUSD: num(c.priceUSD), comingSoon: !!c.comingSoon,
       };

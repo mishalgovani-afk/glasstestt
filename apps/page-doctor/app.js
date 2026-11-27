@@ -129,6 +129,7 @@ const AREAS = [
 ];
 const STATUS_LABEL = { pass: 'Pass', warn: 'Warn', fail: 'Fail' };
 const STATUS_RANK = { fail: 0, warn: 1, pass: 2 };
+const TIER_LABEL = { hit: 'Big hit', indie: 'Established', small: 'Small (under 50 reviews)', upcoming: 'Upcoming' };
 
 let corpus = null;
 let current = null; // { game, comps, diag, manual }
@@ -303,12 +304,12 @@ $('#manualForm').addEventListener('submit', (e) => {
   const wishRaw = parseInt($('#mWish').value, 10);
   const wish = Number.isFinite(wishRaw) && wishRaw >= 0 ? wishRaw : null;
   const game = {
-    appid: null, name: $('#mName').value.trim() || 'Your game', url: null,
+    appid: null, manual: true, name: $('#mName').value.trim() || 'Your game', url: null,
     shortDescription: desc, aboutText: $('#mAbout').value.trim(),
     tags: manualTags.map((name, i) => ({ name, votes: Math.max(1, 1000 - i * 40) })), genres: [],
     priceUSD: price, isFree: price === 0, releaseDate: '', comingSoon: $('#mUnreleased').checked,
     developers: [], publishers: [], headerImage: null, capsuleImage: null,
-    screenshots: Array.from({ length: shots }, () => ''), movies: $('#mTrailer').checked ? 1 : 0,
+    screenshots: Array.from({ length: shots }, () => ''), movies: $('#mTrailer').checked ? 1 : 0, hasTrailer: $('#mTrailer').checked,
     languages: [...manualLangs], fullAudioLanguages: [],
     reviews: { total: null, positivePct: null, scoreDesc: null }, followers: wish, ownersRange: null, ccu: null, hasDemo: null, earlyAccess: false,
   };
@@ -363,7 +364,7 @@ function renderReport() {
   const counts = { pass: 0, warn: 0, fail: 0 };
   checks.forEach((c) => { if (counts[c.status] != null) counts[c.status] += 1; });
   const tone = gradeTone(diag.grade);
-  const prelaunch = manual || !!game.comingSoon || !(game.reviews && game.reviews.total != null);
+  const prelaunch = diag.prelaunch != null ? !!diag.prelaunch : manual || !!game.comingSoon;
 
   /* header */
   const url = steamUrl(game);
@@ -393,10 +394,10 @@ function renderReport() {
       !manual && game.appid ? h('button', { type: 'button', class: 'btn ghost', onclick: () => copyText(location.href.split('#')[0] + `#appid=${game.appid}`, 'Link copied'), text: 'Copy link to this audit' }) : null));
   root.append(head);
 
-  root.append(renderChecks(checks, counts), renderTags(game, diag), renderBenchmarks(game, diag), renderComps(comps), renderRewrite(game, diag));
+  root.append(renderChecks(checks, counts, diag), renderTags(game, diag), renderBenchmarks(game, diag), renderComps(comps), renderRewrite(game, diag));
 }
 
-function renderChecks(checks, counts) {
+function renderChecks(checks, counts, diag) {
   const card = h('section', { class: 'card', 'aria-labelledby': 'checksTitle' });
   const onlyProblems = h('input', { type: 'checkbox', id: 'onlyProblems' });
   const body = h('div');
@@ -412,11 +413,13 @@ function renderChecks(checks, counts) {
       if (!items.length) continue;
       items = items.slice().sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]);
       const passN = checks.filter((c) => c.area === area && c.status === 'pass').length;
+      const ar = diag.areas && diag.areas[area];
       body.append(h('div', { class: 'area' },
-        h('div', { class: 'area-head' }, h('h3', { text: label }), h('span', { class: 'fine', text: `${passN}/${total} passing` })),
+        h('div', { class: 'area-head' }, h('h3', { text: label }), h('span', { class: 'fine', text: `${passN}/${total} passing${ar && ar.score != null ? ` · area score ${ar.score}` : ''}` })),
         h('ul', { class: 'checks' }, items.map((c) => h('li', { class: 'check-item' }, badge(c.status),
-          h('div', null, h('h4', { text: c.title }), c.detail ? h('p', { text: c.detail }) : null,
-            c.fix && c.status !== 'pass' ? h('p', { class: 'fix' }, h('b', { text: 'Fix: ' }), c.fix) : null))))));
+          h('div', null, h('h4', null, c.title, c.manual ? h('span', { class: 'badge plain manual-tag', text: 'Check by eye' }) : null), c.detail ? h('p', { text: c.detail }) : null,
+            c.fix && c.status !== 'pass' ? h('p', { class: 'fix' }, h('b', { text: 'Fix: ' }), c.fix) : null,
+            safeUrl(c.source || (c.sources || [])[0]) ? h('p', { class: 'fine' }, link(c.source || c.sources[0], 'Why this matters')) : null))))));
     }
     if (!body.firstChild) body.append(h('p', { class: 'fine', text: 'Nothing to show. All checks pass.' }));
   };
@@ -459,22 +462,33 @@ const BENCH_DEFS = {
   reviews: { label: 'Reviews', mine: (g) => g.reviews && g.reviews.total },
   positivepct: { label: 'Positive reviews (%)', mine: (g) => g.reviews && g.reviews.positivePct },
   followers: { label: 'Followers', mine: (g) => g.followers },
+  fullaudiolanguages: { label: 'Full audio languages', mine: (g) => (g.fullAudioLanguages || []).length },
+  trailershare: { label: 'Comparables with a trailer', share: true, mine: (g) => (g.movies > 0 ? 'Yes' : 'No') },
+  demoshare: { label: 'Comparables with a demo', share: true, mine: (g) => (g.hasDemo == null ? null : g.hasDemo ? 'Yes' : 'No') },
+  earlyaccessshare: { label: 'Comparables in Early Access', share: true, mine: (g) => (g.earlyAccess ? 'Yes' : 'No') },
   ccu: { label: 'Peak concurrent players', mine: (g) => g.ccu },
 };
 function renderBenchmarks(game, diag) {
-  const pre = current.manual || !!game.comingSoon;
+  const pre = diag.prelaunch != null ? !!diag.prelaunch : current.manual || !!game.comingSoon;
   const rows = [];
   for (const [key, raw] of Object.entries(diag.benchmarks || {})) {
+    if (!/^median|Share$/.test(key)) continue;
     const median = raw && typeof raw === 'object' ? raw.median : raw;
     if (typeof median !== 'number' || Number.isNaN(median)) continue;
     const id = key.replace(/^median/i, '').toLowerCase();
     const def = { ...(BENCH_DEFS[id] || { label: humanize(key.replace(/^median/i, '')), mine: () => null }) };
     if (pre && id === 'followers') def.label = 'Wishlists / followers';
     if (pre && id === 'reviews') { def.label = 'Reviews (comparables, after launch)'; def.mine = () => null; }
+    if (def.share) {
+      let m = null; try { m = def.mine(game); } catch { m = null; }
+      rows.push(h('tr', null, h('td', { text: def.label }), h('td', { class: 'num', text: m == null ? 'n/a' : m }), h('td', { class: 'num', text: `${Math.round(median * 100)}%` }), h('td', { class: 'delta same', text: '' })));
+      continue;
+    }
     const fmt = def.fmt || ((v) => (Number.isInteger(v) ? fmtInt(v) : v.toFixed(1)));
     let mine = null;
     try { mine = def.mine(game); } catch { mine = null; }
     if (typeof mine !== 'number' || Number.isNaN(mine)) mine = null;
+    if (mine === 0 && (id === 'reviews' || id === 'positivepct') && pre) mine = null;
     let verdict = '';
     if (mine != null) { const d = mine - median; verdict = Math.abs(d) < 1e-9 ? 'In line' : `${d > 0 ? 'Above' : 'Below'} by ${def.fmt ? fmt(Math.abs(d)).replace('Free', '$0.00') : fmt(Math.abs(Math.round(d * 10) / 10))}`; }
     rows.push(h('tr', null, h('td', { text: def.label }), h('td', { class: 'num', text: mine == null ? 'n/a' : fmt(mine) }), h('td', { class: 'num', text: fmt(median) }), h('td', { class: 'delta same', text: verdict })));
@@ -499,6 +513,7 @@ function renderComps(comps) {
         picture(g.capsuleImage || g.headerImage, `${g.name} capsule image`, 'comp-img', g.name),
         h('div', { style: 'min-width:0' }, h('div', { class: 'comp-name' }, u ? link(u, g.name) : g.name),
           h('p', { class: 'comp-meta', text: [price$(g), g.reviews && g.reviews.positivePct != null ? `${g.reviews.positivePct}% positive` : null, g.reviews && g.reviews.total != null ? `${fmtCompact(g.reviews.total)} reviews` : null, g.followers != null ? `${fmtCompact(g.followers)} followers` : null, g.ownersRange ? `${g.ownersRange} owners` : null].filter(Boolean).join(' · ') }),
+          c.tier ? h('span', { class: 'badge plain', style: 'margin-top:4px', text: TIER_LABEL[c.tier] || c.tier }) : null,
           (c.sharedTags || []).length ? h('ul', { class: 'chips', 'aria-label': 'Shared tags' }, c.sharedTags.slice(0, 8).map((t) => h('li', { class: 'chip', text: t }))) : null),
         h('div', { class: 'meter', title: 'Similarity' }, h('span', { class: 'sr-only', text: 'Similarity' }), h('span', { class: 'track' }, h('span', { class: 'fill', style: `width:${pct}%` })), h('span', { class: 'val', text: `${pct}%` }))));
     }

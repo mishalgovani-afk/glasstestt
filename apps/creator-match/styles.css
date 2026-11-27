@@ -197,7 +197,7 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 .go-row { margin-top: 6px; }
 
 /* filters + results */
-.filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 12px; }
+.filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr)); gap: 0 12px; }
 .filters .field { margin-bottom: 0; }
 .result-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 4px 0 10px; }
 .result-head h2 { margin: 0; font-size: var(--fs-5); }
