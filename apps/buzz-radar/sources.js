@@ -332,7 +332,7 @@ export const SOURCES = [
   {
     id: "bluesky", name: "Bluesky", kinds: ["post"], needsKey: false,
     keyFields: [
-      { name: "handle", label: "Bluesky handle (optional)", help: "Search is only open without login at times; if it fails, enter your handle, e.g. you.bsky.social.", url: "https://bsky.app" },
+      { name: "handle", label: "Bluesky handle (optional)", help: "Search is only open without login at times; if it fails, enter your handle, e.g. you.bsky.social.", url: "https://bsky.app", optional: true },
       { name: "appPassword", label: "Bluesky app password (optional)", help: "Settings > Privacy and security > App passwords > Add. Never use your main password.", url: "https://bsky.app/settings/app-passwords", optional: true },
     ],
     search: (game, o) => blueskySearch(game, o.keys || {}, o.sinceDays, o.signal, o.limit),
