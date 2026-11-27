@@ -126,8 +126,8 @@ const STORE_KEY = 'creator-match:v1';
 const PLATFORM_LABEL = { youtube: 'YouTube', 'steam-curator': 'Steam curator', twitch: 'Twitch' };
 const TIER_LABEL = { micro: 'Micro', small: 'Small', mid: 'Mid', large: 'Large' };
 const COMPONENT_LABEL = {
-  affinity: 'Tag fit', coverage: 'Covered similar games', indie: 'Covers smaller games', activity: 'Active lately',
-  size: 'Size fit', engagement: 'Audience engagement', language: 'Language',
+  affinity: 'Tag fit', coverage: 'Covered similar games', activity: 'Active lately',
+  engagement: 'Audience engagement', language: 'Language',
 };
 const ACCESS_OPTIONS = [['key', 'Send a Steam key'], ['demo', 'Link to a demo'], ['playtest', 'Playtest key'], ['none', 'Offer only, no key yet']];
 const TONE_LABEL = { friendly: 'Friendly', professional: 'Professional', brief: 'Brief' };
@@ -221,7 +221,7 @@ function buildStaticUi() {
   });
   $('#gameQ').addEventListener('input', renderGameList);
   E.goBtn.addEventListener('click', onGo);
-  for (const id of ['fPlatform', 'fTier', 'fLang', 'fActive', 'fPref']) $('#' + id).addEventListener('change', () => { if (state.target) rerank(); });
+  for (const id of ['fPlatform', 'fTier', 'fLang', 'fActive']) $('#' + id).addEventListener('change', () => { if (state.target) rerank(); });
   E.moreBtn.addEventListener('click', () => { state.shown += PAGE; renderCards(); });
   $('#expCsv').addEventListener('click', onExportCsv);
   $('#expJson').addEventListener('click', onExportJson);
@@ -328,7 +328,6 @@ function rerank() {
   const opts = { activeWithinDays: Number($('#fActive').value) };
   if ($('#fPlatform').value) opts.platform = $('#fPlatform').value;
   if ($('#fLang').value) opts.language = $('#fLang').value;
-  if ($('#fPref').value === 'none') opts.sizeWeights = { micro: 1, small: 1, mid: 1, large: 1, unknown: 1 };
   let list = [];
   try { list = rankCreators(engineTarget(), state.data, opts) || []; } catch (err) { toast(`Ranking failed: ${err.message}`); }
   const tier = $('#fTier').value;

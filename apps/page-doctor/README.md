@@ -13,7 +13,7 @@ It needs no account and no API key. With an optional Anthropic API key, the app 
 ## How to use it
 
 1. **Find your game.** Search by name, or choose "My game isn't on Steam yet" and fill in what you have: name, short description, tags, price, languages, screenshot count and whether you have a trailer. A name, a short description and a few tags are enough to start.
-2. **Read the grade, then the failing checks.** Each check shows its area (capsule, description, tags, media, price, languages, social proof, timing), what was measured, and a fix. Checks marked *manual* need your eyes, for example whether the capsule is readable at small size, and they never change the score.
+2. **Read the grade, then the failing checks.** Each check shows its area (capsule, description, tags, media, price, languages, social proof, timing), what was measured, and a fix. The **manual checklist** below the checks lists what needs your eyes, for example whether the capsule is readable at small size, and it never changes the score.
 3. **Apply the tag suggestions** in Steamworks with the tag wizard. Add a suggested tag only if it honestly describes your game.
 4. **Copy the rewrite prompt** into Claude or ChatGPT, or add an Anthropic key to run it in the app. Check every factual claim in what comes back.
 5. **Re-audit** after the daily data refresh to see the changes.
@@ -34,7 +34,14 @@ If Steam can't be reached, the build still succeeds and uses the committed snaps
 - **kind:** generic tags such as Indie count 0.35 and broad genres such as Action count 0.6;
 - **rarity:** an IDF factor across the corpus, so that sharing "Roguelike Deckbuilder" counts for more than sharing "Singleplayer".
 
-Similarity is the cosine of the two vectors, plus a small bonus for overlapping Steam genres to break ties. Ranking uses **relevance only**: hits, mid-size indies and upcoming games are all fair comparables. Each comparable reports its `tier` (`hit`, `indie`, `small` or `upcoming`), its review count and its owner estimate, so you can judge its scale. The game itself is excluded.
+Similarity is the cosine of the two vectors, plus a small bonus for overlapping Steam genres to break ties.
+
+Comparables are then **matched for scale**, so that a game is measured against pages it can realistically copy. The scale measure is log10(reviews), with owners used when there are no reviews. Every target is treated as at least a successful indie, about 1,000 reviews. A comparable within 10x of the target's scale fits fully, and the fit falls off beyond that. As a result:
+- **An indie or unreleased game** gets successful indies and upcoming games in its niche. Released games with under 50 reviews count as unproven.
+- **A big title** gets big titles.
+- **Mega-hits** stay eligible but rank below peers of a similar size.
+
+The final rank is `similarity × (0.6 + 0.4 × scaleFit) + 0.02 × genreOverlap`, so the niche always matters most. Each comparable reports its `tier` (`hit`, `indie`, `small` or `upcoming`), `scaleFit`, review count and owner estimate. The game itself is excluded.
 
 **Checks and sources.** Every rule is in the `RULES` export of `doctor.js`, with https sources:
 
@@ -66,7 +73,9 @@ score = Σ(areaWeight × areaScore) / Σ(areaWeight)   over areas that have at l
 | price | 5 |
 | timing | 5 |
 
-Grades: A is 85 or more, B 70, C 55, D 40, and F is below 40. Manual checks, and checks without enough data (no price yet, no comparable games), are shown but not scored. `diagnosis.areas` gives every area's score, so the total can be recomputed by hand.
+Grades: A is 85 or more, B 70, C 55, D 40, and F is below 40. Checks without enough data (no price yet, no comparable games) are shown with weight 0. `diagnosis.areas` gives every area's score, so the total can be recomputed by hand.
+
+**Manual checklist.** Rules that need human eyes, or that data can't verify, go in `diagnosis.manualChecklist` (`{id, area, title, detail, fix, sourceUrl}`) and are never scored. Examples are capsule legibility, the first 4 screenshots, 4+ screenshots marked suitable for all ages, the first trailer being gameplay, and general Steamworks hygiene from `HYGIENE_RULES`. Items are shown only when they apply, so pre-launch items appear only for unreleased games and Early Access items only for Early Access games.
 
 ## Limits
 
@@ -95,4 +104,4 @@ const diagnosis = diagnose(game, comparables, { now: new Date() }); // `now` ena
 const { system, user, model, max_tokens } = rewriteRequest(game, diagnosis); // for the optional Anthropic call
 ```
 
-A game can be a corpus entry (see `CONTRACT.md`) or a manual object with only some fields. `normalizeGame` accepts tags as strings or `{name, votes}`, languages as an array or a comma-separated string, `screenshots` as an array or a count, and `hasTrailer` in place of `movies`. A game with no appid, URL or header image is treated as a manual, unreleased game.
+A game can be a corpus entry (see `CONTRACT.md`) or a manual object with only some fields. `normalizeGame` accepts tags as strings or `{name, votes}`, languages as an array or a comma-separated string, `screenshots` as an array or a count, `hasTrailer` in place of `movies`, and `wishlists` for the developer's own wishlist count. A game with no appid, URL or header image is treated as a manual, unreleased game.
