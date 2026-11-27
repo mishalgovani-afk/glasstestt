@@ -39,6 +39,7 @@ export function validateCorpus(c, { minGames = 1 } = {}) {
     if (!numOrNull(g.followers)) err(`${p}.followers must be number|null`);
     if (!(g.ownersRange === null || isStr(g.ownersRange))) err(`${p}.ownersRange must be string|null`);
     if (!numOrNull(g.ccu)) err(`${p}.ccu must be number|null`);
+    if ("fetchedAt" in g && !(isStr(g.fetchedAt) && !Number.isNaN(Date.parse(g.fetchedAt)))) err(`${p}.fetchedAt must be an ISO date string`);
   });
   if (!c.tagIndex || typeof c.tagIndex !== "object" || Array.isArray(c.tagIndex)) err("tagIndex must be an object");
   else {
@@ -50,7 +51,11 @@ export function validateCorpus(c, { minGames = 1 } = {}) {
   return errs;
 }
 
-/** data/catalog.json: { generatedAt, source, games: [[appid, name, "u"?], ...] } (compact: appid + name only). */
+/**
+ * data/catalog.json: { generatedAt, source, format: 2, keys: {...}, games: [ {a, n, u?, t?, p?, d?, r?} ] }
+ *   a appid, n name, u 1 = upcoming (omitted otherwise), t [up to 5 tag names], p price USD, d release date (ISO or Steam text),
+ *   r [review total, positive %].  Short keys keep ~20,000 entries under about 3 MB.
+ */
 export function validateCatalog(c, { minGames = 1 } = {}) {
   const errs = [];
   if (!c || typeof c !== "object") return ["catalog is not an object"];
@@ -61,9 +66,15 @@ export function validateCatalog(c, { minGames = 1 } = {}) {
   const ids = new Set();
   for (const [i, e] of c.games.entries()) {
     if (errs.length > 20) break;
-    if (!Array.isArray(e) || !Number.isFinite(e[0]) || e[0] <= 0 || typeof e[1] !== "string" || !e[1] || (e.length > 2 && e[2] !== "u")) errs.push(`games[${i}] must be [appid, name, "u"?]`);
-    else if (ids.has(e[0])) errs.push(`games[${i}] duplicate appid ${e[0]}`);
-    else ids.add(e[0]);
+    const p = `games[${i}]`;
+    if (!e || typeof e !== "object" || Array.isArray(e) || !isNum(e.a) || e.a <= 0 || !isStr(e.n) || !e.n) { errs.push(`${p} must be {a: appid, n: name, ...}`); continue; }
+    if (ids.has(e.a)) { errs.push(`${p} duplicate appid ${e.a}`); continue; }
+    ids.add(e.a);
+    if ("u" in e && e.u !== 1) errs.push(`${p}.u must be 1 when present`);
+    if ("t" in e && !(strArr(e.t) && e.t.length <= 8)) errs.push(`${p}.t must be an array of tag names`);
+    if ("p" in e && !isNum(e.p)) errs.push(`${p}.p must be a number`);
+    if ("d" in e && !isStr(e.d)) errs.push(`${p}.d must be a string`);
+    if ("r" in e && !(Array.isArray(e.r) && e.r.length === 2 && numOrNull(e.r[0]) && numOrNull(e.r[1]))) errs.push(`${p}.r must be [total, positive%]`);
   }
   return errs;
 }

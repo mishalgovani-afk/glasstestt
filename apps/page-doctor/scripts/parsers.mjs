@@ -283,7 +283,7 @@ export function parsePopularTags(json) {
  * Merge store details + SteamSpy + search-row + reviews into one corpus game (the contract schema).
  * `fallbackTags` is a list of tag names (no votes known) used only if SteamSpy has none.
  */
-export function buildGame({ store, spy = null, row = null, reviews = null, fallbackTags = [], storeTags = [], followers = null }) {
+export function buildGame({ store, spy = null, row = null, reviews = null, fallbackTags = [], storeTags = [], followers = null, fetchedAt = null }) {
   if (!store) return null;
   const spyTags = spy?.tags?.length ? spy.tags : [];
   let tags = spyTags;
@@ -302,6 +302,7 @@ export function buildGame({ store, spy = null, row = null, reviews = null, fallb
     followers: Number.isFinite(followers) ? followers : null,
     ownersRange: spy?.owners ?? null,
     ccu: spy?.ccu ?? null,
+    fetchedAt: fetchedAt || new Date().toISOString(),
   };
 }
 
@@ -321,11 +322,75 @@ export function pickEvenly(list, n) {
   return out;
 }
 
-/** Split a per-tag target into hit / mid / upcoming quotas (about a third each). */
+/** Split a per-tag candidate target into upcoming / mid / hit shares. Indies come first: hits get the smallest share. */
 export function bucketQuotas(perTag) {
-  const hit = Math.ceil(perTag / 3);
-  const mid = Math.round(perTag / 3);
+  const hit = Math.max(1, Math.round(perTag * 0.15));
+  const mid = Math.round(perTag * 0.4);
   return { hit, mid, upcoming: Math.max(0, perTag - hit - mid) };
+}
+
+/** Tags too generic to say what a game is about (used to pick a game's "specific" tags). */
+export const GENERIC_TAGS = new Set(["indie", "singleplayer", "single-player", "action", "adventure", "casual", "2d", "3d", "great soundtrack", "atmospheric", "multiplayer", "simulation", "strategy", "rpg", "early access", "free to play", "colorful", "cute", "funny", "story rich", "controller", "first-person", "third person", "difficult", "replay value", "exploration"]);
+
+/** Top `n` non-generic tag names of a game (tags are ordered by votes). */
+export function specificTags(game, n = 3) {
+  const names = (game?.tags || []).map((t) => (typeof t === "string" ? t : t?.name)).filter(Boolean);
+  const specific = names.filter((t) => !GENERIC_TAGS.has(t.toLowerCase()));
+  return (specific.length >= n ? specific : [...specific, ...names.filter((t) => !specific.includes(t))]).slice(0, n);
+}
+
+/** Does a search row describe a game that is not out yet? */
+export function isUpcomingRow(row, now = new Date()) {
+  if (!row) return false;
+  if (!row.releaseIso) return true; // "Coming soon", "Q2 2027", "2027", "To be announced"
+  return new Date(row.releaseIso + "T00:00:00Z").getTime() > now.getTime() + 86400000;
+}
+
+/**
+ * Compact catalog entry (short keys, see CATALOG_KEYS): a appid, n name, u 1 = upcoming, t tag names (max 5),
+ * p price in USD, d release date (ISO or Steam's text), r [reviews total, positive %].
+ */
+export const CATALOG_KEYS = { a: "appid", n: "name", u: "1 when the game is not released yet (omitted otherwise)", t: "up to 5 tag names, most voted first", p: "price in USD (omitted when unknown)", d: "release date: ISO yyyy-mm-dd or Steam's own text such as 'Q2 2027'", r: "[review total, positive %] (omitted when unknown)" };
+export function catalogEntryFromRow(row, idToName, now = new Date()) {
+  if (!row || !row.appid || !row.name) return null;
+  const e = { a: row.appid, n: row.name };
+  if (isUpcomingRow(row, now)) e.u = 1;
+  const t = [...new Set((row.tagIds || []).map((id) => idToName.get(id)).filter(Boolean))].slice(0, 5);
+  if (t.length) e.t = t;
+  if (row.priceCents != null && row.priceCents >= 0) e.p = Math.round(row.priceCents) / 100;
+  const d = row.releaseIso || row.releaseText;
+  if (d) e.d = d;
+  if (row.reviewTotal != null) e.r = [row.reviewTotal, row.reviewPct ?? null];
+  return e;
+}
+export function catalogEntryFromGame(g) {
+  const e = { a: g.appid, n: g.name };
+  if (g.comingSoon) e.u = 1;
+  const t = (g.tags || []).slice(0, 5).map((x) => x.name);
+  if (t.length) e.t = t;
+  if (g.priceUSD != null) e.p = g.priceUSD;
+  if (g.releaseDate) e.d = g.releaseDate;
+  if (g.reviews && g.reviews.total != null) e.r = [g.reviews.total, g.reviews.positivePct ?? null];
+  return e;
+}
+
+/** Steam storesearch JSON (api/storesearch/?term=) -> [{appid, name}] (apps only). */
+export function parseStoreSearch(json) {
+  return (Array.isArray(json?.items) ? json.items : [])
+    .filter((i) => i && (i.type === undefined || i.type === "app") && Number.isFinite(Number(i.id)) && i.name)
+    .map((i) => ({ appid: Number(i.id), name: decodeEntities(i.name) }));
+}
+/** Steam search/suggest HTML -> [{appid, name}] */
+export function parseSuggestHtml(html) {
+  const out = [];
+  for (const m of String(html ?? "").matchAll(/data-ds-appid="(\d+)"[\s\S]*?<div class="match_name">([\s\S]*?)<\/div>/g)) out.push({ appid: Number(m[1]), name: decodeEntities(m[2].replace(/<[^>]+>/g, "")).trim() });
+  return out;
+}
+/** Best result for a typed name: exact (normalized) match first, then prefix, then the first result. */
+export function pickBestMatch(term, items) {
+  const n = (x) => String(x).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const t = n(term);
+  return items.find((i) => n(i.name) === t) || items.find((i) => n(i.name).startsWith(t)) || items[0] || null;
 }
 
 /** Is an ISO yyyy-mm-dd date within the last `years` years of `now`? */
