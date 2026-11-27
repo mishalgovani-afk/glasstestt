@@ -1,14 +1,13 @@
-# Publishes the splash page and every app to GitHub Pages.
+# Publishes the splash page and every app to GitHub Pages. Fast: no data fetching here.
+# Page Doctor / Creator Match read their saved live data from the `data` branch
+# (filled by data-refresh.yml daily and by add-game.yml on demand).
 # One-time setup: repo Settings → Pages → Source: "GitHub Actions".
-# (Pages on a private repository needs a paid GitHub plan; on a public repo it's free.)
 name: Deploy site to Pages
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
-  schedule:
-    - cron: "17 5 * * *"   # daily: rebuild so Page Doctor / Creator Match pick up fresh Steam data
 
 permissions:
   contents: read
@@ -22,7 +21,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -34,18 +33,14 @@ jobs:
       - name: Test apps
         run: |
           for t in apps/*/tests/*.test.mjs; do [ -f "$t" ] && node --test "$t"; done
+      - name: Load saved live data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/seed-data.sh _data
       - name: Build site
         env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          # Pushes publish straight away with the saved data; only the daily/manual runs fetch fresh Steam data.
-          SKIP_FETCH: ${{ github.event_name == 'push' && '1' || '' }}
-          PD_DEADLINE_MIN: "150"
-          CM_DEADLINE_MIN: "60"
-          CM_MAX_CURATORS: "600"
-        run: |
-          # Page Doctor first, so Creator Match can reuse its fresh Steam corpus.
-          (cd apps/page-doctor && ./scripts/build.sh)
-          REUSE_FETCHED=1 ./scripts/build-site.sh
+          SKIP_FETCH: "1"
+        run: DATA_DIR="$PWD/_data" ./scripts/build-site.sh
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -6,7 +6,8 @@
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { parseArgs, writeJsonAtomic } from "./lib.mjs";
-import { reviewDesc } from "./parsers.mjs";
+import { reviewDesc, catalogEntryFromGame } from "./parsers.mjs";
+import { catalogFile } from "./catalog.mjs";
 import { validateCorpus, validateCatalog } from "./validate.mjs";
 
 function rng(seed) {
@@ -115,7 +116,7 @@ export function makeSample(now = new Date("2026-11-27T00:00:00Z")) {
         screenshots: Array.from({ length: shotN }, (_, i) => `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appid}/ss_sample${String(i + 1).padStart(2, "0")}.1920x1080.jpg`),
         movies: movieN, languages, fullAudioLanguages: fullAudio,
         reviews: { total, positivePct: pct, scoreDesc: total == null ? null : reviewDesc(total, pct) },
-        followers, ownersRange: owners, ccu, hasDemo, earlyAccess: !upcoming && R() < 0.12,
+        followers, ownersRange: owners, ccu, hasDemo, earlyAccess: !upcoming && R() < 0.12, fetchedAt: now.toISOString(),
         _bucket: bucket, _primary: tag,
       });
     }
@@ -134,23 +135,31 @@ export function makeSample(now = new Date("2026-11-27T00:00:00Z")) {
     tagIndex,
   };
 }
-/** A sample catalog: every corpus game plus ~450 more fictional titles (so search can show "added on the next refresh"). */
+/** A sample catalog (short keys, see CATALOG_KEYS): every corpus game plus ~2,000 more fictional titles with tags, price, date and reviews. */
 export function makeSampleCatalog(corpus) {
   const R = rng(777);
   const A = ["Brindle", "Cask", "Dapple", "Eddy", "Flint", "Gable", "Hazel", "Isle", "Jinx", "Kiln", "Loom", "Mire", "Nettle", "Oak", "Pip", "Quartz", "Rook", "Sedge", "Tarn", "Umber", "Vale", "Wick", "Yarrow", "Zephyr"];
   const B = ["Runners", "Keep", "Tides", "Parade", "Garden", "Signal", "Forge", "Harvest", "Drifters", "Atlas", "Orchard", "Station", "Crossing", "Raiders", "Oath", "Rally"];
   const pick = (arr) => arr[Math.floor(R() * arr.length)];
+  const day = (n) => new Date(Date.parse("2026-11-27T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
   const taken = new Set(corpus.games.map((g) => g.name));
-  const out = corpus.games.map((g) => (g.comingSoon ? [g.appid, g.name, "u"] : [g.appid, g.name]));
+  const entries = new Map(corpus.games.map((g) => [g.appid, catalogEntryFromGame(g)]));
+  const tagPool = [...Object.keys(THEMES), "Indie", "Singleplayer", "Pixel Graphics", "Atmospheric", "Relaxing", "Story Rich"];
   let id = 9300000;
-  while (out.length < corpus.games.length + 450) {
-    const name = `${pick(A)} ${pick(B)}${R() < 0.2 ? " " + pick(["Deluxe", "Origins", "Redux", "Zero"]) : ""}`;
+  while (entries.size < corpus.games.length + 2000) {
+    const name = `${pick(A)} ${pick(B)}${R() < 0.2 ? " " + pick(["Deluxe", "Origins", "Redux", "Zero"]) : ""}${R() < 0.3 ? " " + Math.floor(2 + R() * 7) : ""}`;
     if (taken.has(name)) continue;
     taken.add(name);
     id += 1 + Math.floor(R() * 30);
-    out.push(R() < 0.12 ? [id, name, "u"] : [id, name]);
+    const e = { a: id, n: name };
+    const r = R();
+    const tags = [pick(Object.keys(THEMES)), ...Array.from({ length: 2 + Math.floor(R() * 3) }, () => pick(tagPool))];
+    e.t = [...new Set(tags)];
+    if (r < 0.2) { e.u = 1; e.d = R() < 0.5 ? day(10 + Math.floor(R() * 400)) : pick(["Q1 2027", "Q2 2027", "2027", "Coming soon"]); if (R() < 0.8) e.p = pick([4.99, 9.99, 14.99, 19.99]); }
+    else { e.d = day(-Math.floor(20 + R() * 1000)); e.p = pick([0, 2.99, 4.99, 9.99, 14.99, 19.99, 24.99]); const n = Math.floor(Math.exp(2 + R() * 9)); e.r = [n, Math.floor(55 + R() * 43)]; }
+    entries.set(id, e);
   }
-  return { generatedAt: corpus.generatedAt, source: "sample", games: out };
+  return catalogFile(entries.values(), { source: "sample", generatedAt: corpus.generatedAt });
 }
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 

@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 // Creator Match fetcher: Steam curators (keyless) + YouTube channels (RSS keyless, Data API optional) -> creators.json
+// INCREMENTAL and GROWING: it loads the previous creators.json (out/creators.json when that is live data), adds new creators, re-crawls
+// the stalest ones within the time budget and writes the union (cap ~3,000 creators). Each creator carries `fetchedAt`.
+// Order of work: unseen curators first (growth), then stale ones (refresh, about 1 in 4); curators whose reviews are gone and
+// that were last read more than 60 days ago are dropped.
 //
 //   node scripts/fetch-creators.mjs --out dist/data [--corpus ../page-doctor/dist/data/corpus.json]
 //
@@ -17,9 +21,9 @@
 // Games: the Page Doctor corpus when it can be found (--corpus, $CORPUS_PATH, ../page-doctor/dist/data/corpus.json, then the
 // committed snapshot if it is live data), else a small list from SteamSpy/Steam search. No imports from other apps.
 //
-// Options: --out DIR  --corpus FILE  --max-curators N (250 crawled in depth)  --directory-pages N (10)  --deadline-min N (20)
+// Options: --prev FILE  --max-creators N (3000)  --fresh-days N (2)  --gone-days N (60)  --out DIR  --corpus FILE  --max-curators N (800 crawled in depth)  --directory-pages N (24)  --deadline-min N (20)
 //          --yt-games N (40, with API key)  --max-yt-channels N (150)  --max-spy N (2000: games whose tags are looked up on SteamSpy, most-covered first)  --min-output N (20)  --no-youtube
-// Env: CM_DEADLINE_MIN (20: total run budget in minutes; build.sh hard timeout is this + 5), CM_MAX_SPY (2000), CM_MAX_CURATORS (250), YOUTUBE_API_KEY (optional), STEAM_STORE_BASE, STEAMSPY_BASE, YOUTUBE_BASE, YOUTUBE_API_BASE, STEAM_DELAY_MS (1100),
+// Env: CM_DEADLINE_MIN (20: total run budget in minutes; build.sh hard timeout is this + 5), CM_MAX_SPY (2000), CM_MAX_CURATORS (800), CM_DIRECTORY_PAGES (24), CM_MAX_CREATORS (3000), CM_FRESH_DAYS (2), DATA_DIR (data branch checkout: its page-doctor/corpus.json is used as the game list), YOUTUBE_API_KEY (optional), STEAM_STORE_BASE, STEAMSPY_BASE, YOUTUBE_BASE, YOUTUBE_API_BASE, STEAM_DELAY_MS (1100),
 //      STEAMSPY_DELAY_MS (1100), YOUTUBE_DELAY_MS (1100), HTTP_RETRIES (3), RATE_LIMIT_WAIT_MS (45000), DEADLINE_MIN
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -45,8 +49,12 @@ export async function main(argv = process.argv.slice(2)) {
   const opts = {
     out: a.out || "dist/data",
     corpus: a.corpus || process.env.CORPUS_PATH || null,
-    maxCurators: Number(a["max-curators"] ?? numEnv("CM_MAX_CURATORS", 250)),
-    directoryPages: Number(a["directory-pages"] ?? 10),
+    maxCurators: Number(a["max-curators"] ?? numEnv("CM_MAX_CURATORS", 800)),
+    maxCreators: Number(a["max-creators"] ?? numEnv("CM_MAX_CREATORS", 3000)),
+    freshDays: Number(a["fresh-days"] ?? numEnv("CM_FRESH_DAYS", 2)),
+    goneDays: Number(a["gone-days"] ?? 60),
+    prev: a.prev || null,
+    directoryPages: Number(a["directory-pages"] ?? numEnv("CM_DIRECTORY_PAGES", 24)),
     deadlineMin: Number(a["deadline-min"] ?? numEnv("CM_DEADLINE_MIN", numEnv("DEADLINE_MIN", 20))),
     ytGames: Number(a["yt-games"] ?? 40),
     maxYtChannels: Number(a["max-yt-channels"] ?? 150),
@@ -73,6 +81,15 @@ export async function main(argv = process.argv.slice(2)) {
   const { games: baseGames, origin } = await loadGames(opts, store, spyT);
   log(`games: ${baseGames.size} from ${origin}`);
   const gameInfo = new Map(baseGames); // appid -> {appid,name,tags[],reviewsTotal,comingSoon,releaseDate}
+
+  // ---- previous data (the file grows from run to run)
+  const prevFile = readLive(opts.prev || join(opts.out, "creators.json"));
+  const prevCreators = new Map();
+  for (const c of prevFile?.creators || []) prevCreators.set(c.id, { ...c, fetchedAt: c.fetchedAt || prevFile.generatedAt });
+  for (const g of prevFile?.games || []) if (!gameInfo.has(g.appid)) gameInfo.set(g.appid, { appid: g.appid, name: g.name, tags: g.tags || [], ...(g.reviews ? { reviewsTotal: g.reviews.total } : {}), ...(g.comingSoon !== undefined ? { comingSoon: g.comingSoon } : {}), ...(g.releaseDate ? { releaseDate: g.releaseDate } : {}) });
+  log(`previous creators: ${prevCreators.size}${prevFile ? "" : " (none, or sample data: starting fresh)"}`);
+  const freshCut = Date.now() - opts.freshDays * DAY;
+  const droppedIds = new Set();
 
   // Watchlist games (Page Doctor's watchlist.json) must always be searchable, even if no creator covered them and even
   // without a corpus: take them from the corpus when present, else fetch name + tags directly.
@@ -112,8 +129,24 @@ export async function main(argv = process.argv.slice(2)) {
 
   // ---- 3. deep crawl of selected curators
   const corpusIds = new Set(baseGames.keys());
-  const selected = selectCurators([...directory.values()], corpusIds, opts.maxCurators, now);
-  log(`crawling ${selected.length} curators in depth (${selected.filter((c) => c.recent.some((r) => corpusIds.has(r.appid))).length} already overlap the game list)`);
+  const picked = selectCurators([...directory.values()], corpusIds, opts.maxCurators, now);
+  // unseen curators first (growth), stale ones next (refresh, about 1 in 4), fresh ones skipped; known curators missing from this
+  // directory sample are re-read too, straight by id.
+  const pid = (c) => `curator:${c.id}`;
+  const stamp = (c) => Date.parse(prevCreators.get(pid(c))?.fetchedAt || 0);
+  const unseen = picked.filter((c) => !prevCreators.has(pid(c)));
+  const pickedIds = new Set(picked.map((c) => c.id));
+  const staleKnown = [
+    ...picked.filter((c) => prevCreators.has(pid(c)) && stamp(c) <= freshCut),
+    ...[...prevCreators.values()].filter((c) => c.platform === "steam-curator" && !pickedIds.has(c.id.slice(8)) && Date.parse(c.fetchedAt || 0) <= freshCut)
+      .map((c) => ({ id: c.id.slice(8), name: c.name, followers: c.followers, lastActive: c.lastActive, recent: [], description: "", avatar: c.avatar, communityUrl: null })),
+  ].sort((x, y) => stamp(x) - stamp(y));
+  const selected = [];
+  for (let i = 0, j = 0; i < unseen.length || j < staleKnown.length;) {
+    for (let k = 0; k < 3 && i < unseen.length; k++) selected.push(unseen[i++]);
+    if (j < staleKnown.length) selected.push(staleKnown[j++]);
+  }
+  log(`crawling ${selected.length} curators in depth (${unseen.length} new, ${staleKnown.length} stale of ${prevCreators.size} known; ${selected.filter((c) => c.recent.some((r) => corpusIds.has(r.appid))).length} already overlap the game list)`);
   const creators = new Map();
   const ytLinks = new Map(); // key -> {url, curatorName}
   // SteamSpy tag lookups run in the background WHILE the curators are crawled (different host, own rate limit).
@@ -153,7 +186,12 @@ export async function main(argv = process.argv.slice(2)) {
       try { page = parseCuratorPage((await getText(`${storeBase()}/curator/${c.id}/?l=english`, store)).text); } catch (e) { warn(`curator page ${c.id}: ${e.message}`); }
       const cr = curatorToCreator(c, recs, page, now);
       crawled++;
-      if (!cr) continue;
+      if (!cr) {
+        const known = prevCreators.get(pid(c));
+        if (known && Date.now() - Date.parse(known.fetchedAt || 0) > opts.goneDays * DAY) { droppedIds.add(known.id); log(`dropping ${known.id} (${known.name}): no reviews any more and last read over ${opts.goneDays} days ago`); }
+        continue;
+      }
+      cr.fetchedAt = new Date().toISOString();
       creators.set(cr.id, cr);
       for (const g of cr.coveredGames) if (g.appid != null) bump(g.appid);
       for (const l of cr.links) if (parseYouTubeUrl(l.url)) ytLinks.set(l.url, { url: l.url, from: cr.name });
@@ -179,6 +217,12 @@ export async function main(argv = process.argv.slice(2)) {
     if (apiKey) {
       try { await youtubeApiSearch(opts, apiKey, apiT, [...baseGames.values()], channels, now, before); }
       catch (e) { warn(`YouTube API phase failed: ${e.message}`); }
+    }
+    // 4a'. channels read in earlier runs (stalest first), so their uploads stay current
+    for (const c of [...prevCreators.values()].filter((c) => c.platform === "youtube" && Date.parse(c.fetchedAt || 0) <= freshCut).sort((x, y) => Date.parse(x.fetchedAt || 0) - Date.parse(y.fetchedAt || 0))) {
+      if (channels.size >= opts.maxYtChannels) break;
+      const id = c.id.slice(8);
+      if (!channels.has(id)) channels.set(id, { id, name: c.name, subs: c.followers, avatar: c.avatar, language: c.language, videos: [] });
     }
     // 4b. channels published by curators
     for (const { url } of ytLinks.values()) {
@@ -211,7 +255,7 @@ export async function main(argv = process.argv.slice(2)) {
         if (!all.length) continue;
         for (const g of all) if (g.appid != null) bump(g.appid);
         ytCreators.set(`youtube:${ch.id}`, {
-          id: `youtube:${ch.id}`, platform: "youtube", name: ch.name || feed.title || ch.id, url: `https://www.youtube.com/channel/${ch.id}`,
+          fetchedAt: new Date().toISOString(), id: `youtube:${ch.id}`, platform: "youtube", name: ch.name || feed.title || ch.id, url: `https://www.youtube.com/channel/${ch.id}`,
           avatar: ch.avatar, followers: ch.subs, language: ch.language, lastActive: newest(feed.entries.map((e) => e.published)),
           uploadsPerMonth: uploadsPerMonth(feed.entries), avgViews: averageViews(feed.entries),
           coveredGames: all, tagAffinity: {}, links: [{ label: "YouTube", url: `https://www.youtube.com/channel/${ch.id}` }],
@@ -225,21 +269,30 @@ export async function main(argv = process.argv.slice(2)) {
   workDone = true;
   await spyJob;
 
-  // ---- 5. assemble
+  // ---- 5. assemble: previous creators (minus dropped) overlaid with the ones read in this run, capped
+  const all = new Map();
+  for (const [id, c] of prevCreators) if (!droppedIds.has(id)) all.set(id, c);
+  for (const [id, c] of creators) all.set(id, c);
   const gamesByAppid = new Map([...gameInfo.entries()].map(([id, g]) => [id, { tags: g.tags || [] }]));
-  const out = [];
-  const referenced = new Set();
-  for (const cr of creators.values()) {
+  let out = [];
+  for (const cr of all.values()) {
     cr.coveredGames = dedupeCovered(cr.coveredGames).slice(0, 40);
     if (!cr.coveredGames.length) continue;
     cr.tagAffinity = buildTagAffinity(cr.coveredGames, gamesByAppid);
-    for (const g of cr.coveredGames) if (g.appid != null) referenced.add(g.appid);
     out.push(cr);
   }
-  out.sort((x, y) => (y.followers ?? 0) - (x.followers ?? 0) || (Date.parse(y.lastActive || "") || 0) - (Date.parse(x.lastActive || "") || 0));
-  // games[]: every game covered by a creator, plus every game we know about (the whole Page Doctor corpus, the watchlist),
-  // so the "a game on Steam" search finds them even when nobody covered them yet.
-  const allIds = new Set([...referenced, ...gameInfo.keys(), ...watchIds]);
+  if (out.length > opts.maxCreators) {
+    out.sort((x, y) => Date.parse(y.fetchedAt || 0) - Date.parse(x.fetchedAt || 0));
+    log(`cap ${opts.maxCreators} reached: evicting the ${out.length - opts.maxCreators} oldest creators`);
+    out = out.slice(0, opts.maxCreators);
+  }
+  const referenced = new Set();
+  for (const cr of out) for (const g of cr.coveredGames) if (g.appid != null) referenced.add(g.appid);
+  out.sort((x, y) => (y.followers ?? 0) - (x.followers ?? 0) || (Date.parse(y.lastActive || "") || 0) - (Date.parse(x.lastActive || "") || 0) || (x.id < y.id ? -1 : 1));
+  // games[]: every game covered by a creator, plus the whole Page Doctor corpus (when we have it) and the watchlist, so
+  // the "a game on Steam" search finds them even when nobody covered them yet.
+  const corpusIdsOut = origin.startsWith("corpus") ? [...baseGames.keys()] : [];
+  const allIds = new Set([...referenced, ...corpusIdsOut, ...watchIds]);
   const gamesOut = [...allIds].filter((id) => gameInfo.has(id)).map((id) => {
     const g = gameInfo.get(id);
     const o = { appid: id, name: g?.name || `App ${id}`, tags: g?.tags || [] };
@@ -247,12 +300,12 @@ export async function main(argv = process.argv.slice(2)) {
     if (g?.comingSoon !== undefined) o.comingSoon = g.comingSoon;
     if (g?.releaseDate) o.releaseDate = g.releaseDate;
     return o;
-  }).filter((g) => referenced.has(g.appid) || !/^App \d+$/.test(g.name));
+  }).filter((g) => referenced.has(g.appid) || !/^App \d+$/.test(g.name)).sort((x, y) => x.appid - y.appid);
   const watchMissing = watchIds.filter((id) => !gamesOut.some((g) => g.appid === id));
   if (watchMissing.length) warn(`watchlist games not available (no name found): ${watchMissing.join(", ")}`);
   const result = {
     generatedAt: new Date().toISOString(), source: "live", creators: out, games: gamesOut,
-    meta: { gamesFrom: origin, curatorsInDirectory: directory.size, curatorsCrawled: crawled, youtubeApi: !!apiKey, elapsedSec: Math.round((Date.now() - t0) / 1000) },
+    meta: { gamesFrom: origin, previous: prevCreators.size, refreshedThisRun: creators.size, dropped: droppedIds.size, curatorsInDirectory: directory.size, curatorsCrawled: crawled, youtubeApi: !!apiKey, elapsedSec: Math.round((Date.now() - t0) / 1000) },
   };
 
   // ---- summary
@@ -275,6 +328,14 @@ export async function main(argv = process.argv.slice(2)) {
 
 // ------------------------------------------------------------------ helpers
 
+function readLive(path) {
+  try {
+    if (!path || !existsSync(path)) return null;
+    const j = JSON.parse(readFileSync(path, "utf8"));
+    return j && j.source === "live" ? j : null; // never build on sample data
+  } catch (e) { warn(`could not read previous data ${path}: ${e.message}`); return null; }
+}
+
 function newest(dates) {
   const t = dates.map((d) => Date.parse(d || "")).filter(Number.isFinite);
   return t.length ? new Date(Math.max(...t)).toISOString() : null;
@@ -289,7 +350,7 @@ function dedupeCovered(list) {
   }).map((g) => ({ appid: g.appid ?? null, name: g.name, url: g.url ?? null, date: g.date ?? null, title: g.title || g.name, views: g.views ?? null }));
 }
 
-async function fetchDirectory(start, store) {
+export async function fetchDirectory(start, store) {
   const urls = [
     `${storeBase()}/curators/ajaxgetcurators/render/?start=${start}&count=50&l=english`,
     `${storeBase()}/curators/ajaxgetcurators/?query=&start=${start}&count=50&dynamic_data=&filter=all&appid=0&l=english`,
@@ -306,7 +367,7 @@ async function fetchDirectory(start, store) {
   throw lastErr;
 }
 
-async function fetchRecommendations(id, store, now) {
+export async function fetchRecommendations(id, store, now) {
   const q = "query=&start=0&count=100&dynamic_data=&sort=recent&app_types=&reset=false&curations=&tagids=&l=english&cc=us";
   let lastErr;
   for (const u of [`${storeBase()}/curator/${id}/ajaxgetfilteredrecommendations/?${q}`, `${storeBase()}/curator/${id}/ajaxgetfilteredrecommendations/render/?${q}`]) {
@@ -394,7 +455,7 @@ async function youtubeApiSearch(opts, key, apiT, games, channels, now, before) {
 }
 
 /** Name, release info and tags for one game straight from Steam (appdetails) + SteamSpy, with the store-page tag modal as fallback. */
-async function fetchWatchGame(id, store, spyT, existing) {
+export async function fetchWatchGame(id, store, spyT, existing) {
   const g = { appid: id, name: existing?.name || "", tags: existing?.tags || [] };
   try {
     const json = await getJson(`${storeBase()}/api/appdetails?appids=${id}&cc=us&l=en`, store, { treat403AsLimit: true });
@@ -426,7 +487,7 @@ async function fetchWatchGame(id, store, spyT, existing) {
 }
 
 async function loadGames(opts, store, spyT) {
-  const candidates = [opts.corpus, resolve(HERE, "../../page-doctor/dist/data/corpus.json"), resolve(HERE, "../../page-doctor/data/corpus.json")].filter(Boolean);
+  const candidates = [opts.corpus, process.env.DATA_DIR ? join(process.env.DATA_DIR, "page-doctor/corpus.json") : null, resolve(HERE, "../../page-doctor/dist/data/corpus.json"), resolve(HERE, "../../page-doctor/data/corpus.json")].filter(Boolean);
   for (const p of candidates) {
     try {
       if (!existsSync(p)) continue;

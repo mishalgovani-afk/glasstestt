@@ -44,6 +44,7 @@ export function validateCreators(c, { minCreators = 1 } = {}) {
     for (const k of ["followers", "uploadsPerMonth", "avgViews"]) if (!numOrNull(cr[k])) err(`${p}.${k} must be number|null`);
     if (!(cr.language === null || isStr(cr.language))) err(`${p}.language must be string|null`);
     if (!isoOrNull(cr.lastActive)) err(`${p}.lastActive must be ISO|null`);
+    if ("fetchedAt" in cr && !(isStr(cr.fetchedAt) && !Number.isNaN(Date.parse(cr.fetchedAt)))) err(`${p}.fetchedAt must be an ISO date string`);
     if (!Array.isArray(cr.coveredGames)) err(`${p}.coveredGames must be an array`);
     else cr.coveredGames.forEach((g, j) => {
       if (!g || !isStr(g.name) || !g.name || !(g.appid === null || isNum(g.appid)) || !isoOrNull(g.date ?? null) || !isStr(g.title) || !numOrNull(g.views ?? null) || !(g.url === null || https(g.url))) err(`${p}.coveredGames[${j}] is malformed`);

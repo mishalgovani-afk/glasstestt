@@ -186,7 +186,8 @@ export async function main(argv = process.argv.slice(2)) {
     return { ...t, id: liveId || t.id };
   });
   const tagNames = tagDefs.map((t) => t.name);
-  const tagNormToName = new Map(tagDefs.flatMap((t) => [t.name, ...(t.aliases || [])].map((n) => [norm(n), t.name])));
+  // tagIndex covers ALL known tags (not only the ones discovered in this run), so earlier runs' games keep their memberships
+  const tagNormToName = new Map(TAGS.flatMap((t) => [t.name, ...(t.aliases || [])].map((n) => [norm(n), t.name])));
   for (const t of TAGS) idToName.set(t.id, t.name);
   for (const [n, id] of Object.entries(live)) idToName.set(id, n);
 
@@ -318,7 +319,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   // ---- tagIndex (from every game's own top tags plus the tags it was found under in this run)
   const tagIndex = {};
-  for (const t of tagNames) tagIndex[t] = [];
+  for (const t of TAGS) tagIndex[t.name] = [];
   for (const g of games) {
     const mine = new Set(foundUnder.get(g.appid) || []);
     for (const t of g.tags.slice(0, 12)) { const canon = tagNormToName.get(norm(t.name)); if (canon) mine.add(canon); }

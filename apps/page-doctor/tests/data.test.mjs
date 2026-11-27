@@ -10,10 +10,11 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   parseSteamDate, reviewDesc, parseLanguages, parseStoreDetails, unwrapAppDetails, parseSpy, parseSpyTagList, parseSearchRows,
-  parseStorePageTags, parseMemberCount, parsePopularTags, parseAppReviews, buildGame, isRecent, htmlToText, pickEvenly, bucketQuotas,
+  parseStorePageTags, parseMemberCount, parsePopularTags, parseAppReviews, buildGame, isRecent, htmlToText, pickEvenly, bucketQuotas, specificTags, catalogEntryFromRow, catalogEntryFromGame, isUpcomingRow, parseStoreSearch, parseSuggestHtml, pickBestMatch,
 } from "../scripts/parsers.mjs";
 import { validateCorpus, validateCatalog } from "../scripts/validate.mjs";
-import { makeSample } from "../scripts/make-sample.mjs";
+import { makeSample, makeSampleCatalog } from "../scripts/make-sample.mjs";
+import { mergeCorpus, mergeCatalog } from "../scripts/merge-data.mjs";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readJson = (p) => JSON.parse(readFileSync(join(APP, p), "utf8"));
@@ -208,7 +209,7 @@ test("small helpers", () => {
   assert.equal(isRecent(null, 3), false);
   assert.deepEqual(pickEvenly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 5), [1, 3, 5, 7, 9]);
   assert.deepEqual(pickEvenly([1, 2], 5), [1, 2]);
-  assert.deepEqual(bucketQuotas(40), { hit: 14, mid: 13, upcoming: 13 });
+  assert.deepEqual(bucketQuotas(40), { hit: 6, mid: 16, upcoming: 18 }); // indies first: hits get the smallest share
 });
 
 // ---------- snapshot schema
@@ -227,12 +228,21 @@ test("committed data/corpus.json is valid and realistic", () => {
   for (const [tag, ids] of Object.entries(c.tagIndex)) assert.ok(ids.length >= 5, `tag ${tag} has few games`);
 });
 
-test("committed data/catalog.json is valid", () => {
+test("committed data/catalog.json is valid, compact and covers the corpus", () => {
   const c = readJson("data/catalog.json");
   assert.deepEqual(validateCatalog(c, { minGames: 100 }), []);
+  assert.equal(c.format, 2);
+  assert.ok(c.keys && c.keys.a && c.keys.n && c.keys.r, "keys are documented in the file");
   const corpus = readJson("data/corpus.json");
-  const ids = new Set(c.games.map((e) => e[0]));
-  for (const g of corpus.games) assert.ok(ids.has(g.appid), `catalog is missing corpus game ${g.appid}`);
+  const ids = new Map(c.games.map((e) => [e.a, e]));
+  for (const g of corpus.games) {
+    const e = ids.get(g.appid);
+    assert.ok(e, `catalog is missing corpus game ${g.appid}`);
+    assert.equal(e.n, g.name);
+    assert.equal(!!e.u, g.comingSoon);
+  }
+  assert.ok(c.games.some((e) => e.u === 1) && c.games.some((e) => e.t?.length >= 3 && e.p != null && e.r && e.d), "entries carry tags, price, date, reviews");
+  assert.ok(JSON.stringify(c).length / c.games.length < 150, "about 20,000 entries stay under ~3 MB");
 });
 
 test("validateCorpus catches broken data", () => {
@@ -248,7 +258,8 @@ test("validateCorpus catches broken data", () => {
   assert.match(errs, /reviews must be/);
   assert.match(errs, /not in games/);
   assert.match(errs, /source must be/);
-  assert.notDeepEqual(validateCatalog({ generatedAt: "x", source: "live", games: [[1, "a"], [1, "b"]] }), []);
+  assert.notDeepEqual(validateCatalog({ generatedAt: new Date().toISOString(), source: "live", games: [{ a: 1, n: "a" }, { a: 1, n: "b" }] }), []);
+  assert.notDeepEqual(validateCatalog({ generatedAt: new Date().toISOString(), source: "live", games: [[1, "old array format"]] }), []);
 });
 
 test("sample generator is deterministic", () => {
@@ -326,6 +337,11 @@ function mockServer(cfg = {}) {
       const page = all.slice(start, start + Math.min(count, 50));
       return send({ success: 1, total_count: all.length, start, results_html: page.map((i) => rowHtml(i.id, `Game ${i.id}`, i.date, i.rev, i.pct, `${tagId || 1716},492`)).join("\n") });
     }
+    if (u.pathname === "/api/storesearch/") {
+      const term = u.searchParams.get("term") || "";
+      const m2 = term.match(/Game (\d+)/);
+      return send({ total: m2 ? 1 : 0, items: m2 ? [{ type: "app", name: `Game ${m2[1]}`, id: Number(m2[1]) }, { type: "app", name: "Other", id: 2000099 }] : [] });
+    }
     if (u.pathname === "/api/appdetails") {
       const id = Number(u.searchParams.get("appids")); const i = info(id);
       if (!i) return send({ [id]: { success: false } });
@@ -379,7 +395,9 @@ test("fetch-steam.mjs end to end against a mock server (two tags, hits + mid + u
     assert.deepEqual(Object.keys(corpus.tagIndex).sort(), ["Cozy", "Roguelike"]);
     const cat = JSON.parse(readFileSync(join(out, "catalog.json"), "utf8"));
     assert.deepEqual(validateCatalog(cat, { minGames: 50 }), []);
-    assert.ok(cat.games.some((e) => e[2] === "u"));
+    assert.ok(cat.games.some((e) => e.u === 1));
+    assert.ok(cat.games.some((e) => e.t && e.t.includes("Roguelike") && e.r), "catalog entries carry tags and reviews from the search rows");
+    assert.ok(corpus.games.every((g) => g.fetchedAt && !Number.isNaN(Date.parse(g.fetchedAt))), "every game has fetchedAt");
     assert.match(log, /summary/);
     assert.ok(hits.some((h) => h.includes("filter=popularcomingsoon")));
   } finally {
@@ -456,4 +474,164 @@ test("Throttle: a pause only holds back its own host, and delay creeps back afte
   a.delayMs = 1000; a.baseDelayMs = 100;
   for (let i = 0; i < 30; i++) a.note(200, true);
   assert.ok(a.delayMs < 1000 && a.delayMs >= 100);
+});
+
+test("parsers for add-game and the catalog", () => {
+  assert.deepEqual(specificTags({ tags: [{ name: "Indie" }, { name: "Roguelike" }, { name: "Singleplayer" }, { name: "Deckbuilding" }, { name: "Card Game" }, { name: "Cozy" }] }, 3), ["Roguelike", "Deckbuilding", "Card Game"]);
+  assert.deepEqual(specificTags({ tags: [{ name: "Indie" }, { name: "Roguelike" }] }, 3), ["Roguelike", "Indie"]);
+  const idToName = new Map([[1716, "Roguelike"], [492, "Indie"]]);
+  const rows = parseSearchRows(SEARCH_HTML);
+  assert.deepEqual(catalogEntryFromRow(rows[0], idToName, new Date("2026-11-27")), { a: 1100001, n: "Lantern & Thorn", t: ["Roguelike", "Indie"], p: 11.99, d: "2025-11-03", r: [4321, 93] });
+  const up = catalogEntryFromRow(rows[1], idToName, new Date("2026-11-27"));
+  assert.equal(up.u, 1);
+  assert.equal(up.d, "Q2 2027");
+  assert.equal(isUpcomingRow({ releaseIso: "2027-01-01" }, new Date("2026-11-27")), true);
+  assert.equal(isUpcomingRow({ releaseIso: "2025-01-01" }, new Date("2026-11-27")), false);
+  assert.deepEqual(catalogEntryFromGame({ appid: 5, name: "X", comingSoon: true, tags: [{ name: "A" }], priceUSD: null, releaseDate: "2027", reviews: { total: null, positivePct: null } }), { a: 5, n: "X", u: 1, t: ["A"], d: "2027" });
+  assert.deepEqual(parseStoreSearch({ total: 2, items: [{ type: "app", name: "Hades &amp; Co", id: 1 }, { type: "bundle", name: "B", id: 2 }, { name: "no id" }] }), [{ appid: 1, name: "Hades & Co" }]);
+  assert.deepEqual(parseSuggestHtml('<a class="match" data-ds-appid="620"><div class="match_name">Portal 2</div></a>'), [{ appid: 620, name: "Portal 2" }]);
+  assert.equal(pickBestMatch("portal 2", [{ appid: 1, name: "Portal" }, { appid: 620, name: "Portal 2" }]).appid, 620);
+  assert.equal(pickBestMatch("zzz", []), null);
+});
+
+// ---------- persistent, growing data: incremental fetch, merge, DATA_DIR
+const mkGame = (appid, fetchedAt, extra = {}) => ({ ...makeSample().games[0], appid, name: `G${appid}`, fetchedAt, tags: [{ name: "Roguelike", votes: 5 }], ...extra });
+const liveFile = (games, tagIndex = {}, generatedAt = "2026-11-01T00:00:00.000Z") => ({ generatedAt, source: "live", games, tagIndex });
+
+test("merge-data: newest fetchedAt wins, union of games and tagIndex, deterministic, sample never pollutes", () => {
+  const base = liveFile([mkGame(1, "2026-10-01T00:00:00.000Z", { name: "old" }), mkGame(2, "2026-10-01T00:00:00.000Z")], { Roguelike: [1, 2] });
+  const next = liveFile([mkGame(1, "2026-11-01T00:00:00.000Z", { name: "new" }), mkGame(3, "2026-11-01T00:00:00.000Z"), mkGame(2, "2026-09-01T00:00:00.000Z", { name: "stale-copy" })], { Roguelike: [1, 3], Cozy: [3] }, "2026-11-20T00:00:00.000Z");
+  const m = mergeCorpus(base, next);
+  assert.deepEqual(m.games.map((g) => g.appid), [1, 2, 3]);
+  assert.equal(m.games[0].name, "new");
+  assert.equal(m.games[1].name, "G2", "an older copy does not overwrite a newer entry");
+  assert.deepEqual(m.tagIndex, { Cozy: [3], Roguelike: [1, 2, 3] });
+  assert.equal(m.generatedAt, "2026-11-20T00:00:00.000Z");
+  assert.equal(JSON.stringify(mergeCorpus(base, next)), JSON.stringify(m));
+  assert.deepEqual(validateCorpus(m), []);
+  // order of runs does not matter for the winner
+  assert.equal(JSON.stringify(mergeCorpus(next, base).games.map((g) => [g.appid, g.name])), JSON.stringify(m.games.map((g) => [g.appid, g.name])));
+  // sample data is ignored when live data exists, and a sample base is ignored
+  assert.equal(mergeCorpus(base, makeSample()).games.length, 2);
+  assert.equal(mergeCorpus(makeSample(), next).games.length, 3);
+  assert.equal(mergeCorpus(null, next).games.length, 3);
+});
+
+test("merge-data: cap evicts the oldest entries but never the watchlist", () => {
+  const games = [1, 2, 3, 4].map((id) => mkGame(id, `2026-0${id}-01T00:00:00.000Z`));
+  const m = mergeCorpus(null, liveFile(games), { max: 2, keep: new Set([1]) });
+  assert.deepEqual(m.games.map((g) => g.appid), [1, 4]);
+  assert.deepEqual(validateCorpus(m), []);
+});
+
+test("merge-data: catalog union, newer file wins, capped", () => {
+  const f = (games, g = "2026-11-01T00:00:00.000Z") => ({ generatedAt: g, source: "live", format: 2, games });
+  const m = mergeCatalog(f([{ a: 1, n: "old" }, { a: 2, n: "two" }]), f([{ a: 1, n: "new", u: 1 }, { a: 3, n: "three" }], "2026-11-05T00:00:00.000Z"));
+  assert.deepEqual(m.games.map((e) => [e.a, e.n]), [[1, "new"], [2, "two"], [3, "three"]]);
+  assert.deepEqual(validateCatalog(m), []);
+  assert.equal(mergeCatalog(null, f([{ a: 1, n: "a" }, { a: 2, n: "b", r: [10, 90] }, { a: 3, n: "c" }]), { max: 2 }).games.length, 2);
+  assert.equal(mergeCatalog(null, makeSampleCatalog(makeSample())).games.length, 2150);
+});
+
+test("merge-data.mjs CLI writes the merged file and is repeatable", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pd-merge-"));
+  try {
+    const b = join(dir, "base.json"), n = join(dir, "new.json"), o1 = join(dir, "o1.json"), o2 = join(dir, "o2.json");
+    writeFileSync(b, JSON.stringify(liveFile([mkGame(1, "2026-10-01T00:00:00.000Z")], { Roguelike: [1] })));
+    writeFileSync(n, JSON.stringify(liveFile([mkGame(2, "2026-11-01T00:00:00.000Z")], { Roguelike: [2] })));
+    execFileSync(process.execPath, [join(APP, "scripts/merge-data.mjs"), "--base", b, "--new", n, "--out", o1]);
+    execFileSync(process.execPath, [join(APP, "scripts/merge-data.mjs"), "--base", b, "--new", n, "--out", o2]);
+    assert.equal(readFileSync(o1, "utf8"), readFileSync(o2, "utf8"));
+    assert.deepEqual(JSON.parse(readFileSync(o1, "utf8")).games.map((g) => g.appid), [1, 2]);
+    execFileSync(process.execPath, [join(APP, "scripts/merge-data.mjs"), "--base", join(dir, "missing.json"), "--new", n, "--out", o2]); // first run: no base yet
+    assert.deepEqual(JSON.parse(readFileSync(o2, "utf8")).games.map((g) => g.appid), [2]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("build.sh seeds dist/data from DATA_DIR (the data branch) instead of the committed sample", () => {
+  const { dir, dest } = tmpCopyOfApp();
+  try {
+    const dd = join(dir, "databranch");
+    const live = { ...readJson("data/corpus.json"), source: "live" };
+    execFileSync("mkdir", ["-p", join(dd, "page-doctor")]);
+    writeFileSync(join(dd, "page-doctor/corpus.json"), JSON.stringify(live, null, 2)); // pretty printed is fine too
+    const out = execFileSync("bash", ["scripts/build.sh"], { cwd: dest, env: { ...process.env, SKIP_FETCH: "1", DATA_DIR: dd }, stdio: "pipe" }).toString();
+    assert.match(out, /seeded dist\/data\/corpus.json from the data branch/);
+    assert.equal(JSON.parse(readFileSync(join(dest, "dist/data/corpus.json"), "utf8")).source, "live");
+    assert.equal(JSON.parse(readFileSync(join(dest, "dist/data/catalog.json"), "utf8")).source, "sample", "files missing on the data branch fall back to the committed sample");
+    // REUSE_FETCHED recognises pretty-printed live data too
+    const out2 = execFileSync("bash", ["scripts/build.sh"], { cwd: dest, env: { ...process.env, REUSE_FETCHED: "1", DATA_DIR: dd } , stdio: "pipe" }).toString();
+    assert.match(out2, /REUSE_FETCHED/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the fetcher is incremental: it keeps and refreshes the previous corpus, adds new games, drops games that are gone", async () => {
+  const { server } = mockServer();
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "pd-inc-"));
+  const out = join(dir, "out");
+  try {
+    const common = ["--out", out, "--min-output", "5", "--catalog-size", "200", "--per-tag", "12", "--watchlist", join(dir, "none.json")];
+    await runFetch([...common, "--tags", "Roguelike"], mockEnv(base));
+    const run1 = JSON.parse(readFileSync(join(out, "corpus.json"), "utf8"));
+    const rogueIds = new Set(run1.games.map((g) => g.appid));
+    assert.ok(rogueIds.size >= 10);
+    // doctor the file: one very old game that no longer exists on Steam, one recently read game that no longer exists, and age everything else
+    const longAgo = new Date(Date.now() - 100 * 86400000).toISOString(), weekAgo = new Date(Date.now() - 10 * 86400000).toISOString();
+    run1.games = run1.games.map((g) => ({ ...g, fetchedAt: weekAgo }));
+    run1.games.push({ ...run1.games[0], appid: 5, name: "Gone and old", fetchedAt: longAgo }, { ...run1.games[0], appid: 6, name: "Gone but recent", fetchedAt: weekAgo });
+    run1.tagIndex.Roguelike.push(5, 6);
+    writeFileSync(join(out, "corpus.json"), JSON.stringify(run1));
+    const log2 = await runFetch([...common, "--tags", "Cozy"], mockEnv(base));
+    const run2 = JSON.parse(readFileSync(join(out, "corpus.json"), "utf8"));
+    const ids2 = new Set(run2.games.map((g) => g.appid));
+    for (const id of rogueIds) assert.ok(ids2.has(id), `previous game ${id} survived a run that only looked at another tag`);
+    assert.ok(run2.games.some((g) => !rogueIds.has(g.appid)), "new games were added");
+    assert.ok(!ids2.has(5), "old game that vanished from Steam was dropped");
+    assert.ok(ids2.has(6), "recently read game that vanished is kept for now");
+    assert.match(log2, /dropping 5 /);
+    assert.ok(run2.games.filter((g) => rogueIds.has(g.appid) && g.fetchedAt !== weekAgo).length > 0, "stale previous games were refreshed");
+    assert.ok(run2.games.every((g) => g.fetchedAt));
+    assert.deepEqual(validateCorpus(run2, { minGames: 5 }), []);
+    assert.ok(run2.tagIndex.Roguelike.length >= 10 && run2.tagIndex.Cozy.length >= 5, "tagIndex covers both runs");
+    assert.equal(JSON.stringify(run2.games.map((g) => g.appid)), JSON.stringify([...ids2].sort((x, y) => x - y)), "games are sorted by appid");
+    // sample data is never built upon
+    writeFileSync(join(out, "corpus.json"), JSON.stringify(makeSample()));
+    await runFetch([...common, "--tags", "Cozy"], mockEnv(base));
+    assert.ok(JSON.parse(readFileSync(join(out, "corpus.json"), "utf8")).games.every((g) => g.appid < 9000000), "a sample previous file is ignored");
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("add-game.mjs: resolves names and appids, fetches them first, then indie comparables; writes partial files and watchlist-added.json", async () => {
+  const { server, hits } = mockServer();
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "pd-add-"));
+  try {
+    const out = join(dir, "out");
+    const log = await new Promise((resolve, reject) => {
+      let buf = "";
+      const p = spawn(process.execPath, [join(APP, "scripts/add-game.mjs"), "--games", "2000003,Game 2000007", "--out", out, "--per-tag", "12"], { env: { ...mockEnv(base), ADD_DEADLINE_MIN: "3" } });
+      p.stdout.on("data", (d) => (buf += d)); p.stderr.on("data", (d) => (buf += d));
+      p.on("close", (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}\n${buf}`))));
+    });
+    assert.match(log, /resolved "Game 2000007" -> 2000007/);
+    assert.match(log, /deadline=3min/);
+    assert.match(log, /summary/);
+    const corpus = JSON.parse(readFileSync(join(out, "corpus.json"), "utf8"));
+    assert.deepEqual(validateCorpus(corpus, { minGames: 3 }), []);
+    const ids = corpus.games.map((g) => g.appid);
+    assert.ok(ids.includes(2000003) && ids.includes(2000007), "requested games are in the file");
+    assert.ok(corpus.games.length >= 8, `comparables fetched: ${corpus.games.length}`);
+    assert.ok(corpus.games.every((g) => g.fetchedAt));
+    assert.deepEqual(JSON.parse(readFileSync(join(out, "watchlist-added.json"), "utf8")), { appids: [2000003, 2000007] });
+    const cat = JSON.parse(readFileSync(join(out, "catalog.json"), "utf8"));
+    assert.deepEqual(validateCatalog(cat), []);
+    assert.ok(cat.games.some((e) => e.a === 2000007));
+    // the requested games are fetched before any search for comparables
+    const firstDetail = hits.findIndex((h) => h.startsWith("/api/appdetails?appids=2000003"));
+    const firstCompSearch = hits.findIndex((h) => h.startsWith("/search/results/"));
+    assert.ok(firstDetail >= 0 && firstCompSearch > firstDetail, "details of the requested games come first");
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
 });

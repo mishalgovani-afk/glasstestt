@@ -124,6 +124,7 @@ export function makeSample(now = new Date("2026-11-27T00:00:00Z")) {
       avgViews: platform === "steam-curator" ? null : Math.max(30, Math.round(followers * (platform === "twitch" ? 0.012 + R() * 0.03 : 0.02 + R() * 0.1))),
       coveredGames: covered,
       tagAffinity: buildTagAffinity(covered, gamesByAppid),
+      fetchedAt: iso(now),
       links,
     });
   }
@@ -137,6 +138,37 @@ export function makeSample(now = new Date("2026-11-27T00:00:00Z")) {
   };
 }
 
+/** Sample catalog in the shared compact format (a appid, n name, u upcoming, t tags, p price, d date, r [reviews, positive %]). */
+export function makeSampleCatalog(data) {
+  const R = rng(777);
+  const A = ["Brindle", "Cask", "Dapple", "Eddy", "Flint", "Gable", "Hazel", "Isle", "Jinx", "Kiln", "Loom", "Mire", "Nettle", "Oak", "Pip", "Quartz", "Rook", "Sedge", "Tarn", "Umber", "Vale", "Wick", "Yarrow", "Zephyr"];
+  const B = ["Runners", "Keep", "Tides", "Parade", "Garden", "Signal", "Forge", "Harvest", "Drifters", "Atlas", "Orchard", "Station", "Crossing", "Raiders", "Oath", "Rally"];
+  const pick = (a) => a[Math.floor(R() * a.length)];
+  const day = (n) => new Date(Date.parse("2026-11-27T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+  const taken = new Set(data.games.map((g) => g.name));
+  const entries = new Map(data.games.map((g) => {
+    const e = { a: g.appid, n: g.name };
+    if (g.comingSoon) e.u = 1;
+    if (g.tags?.length) e.t = g.tags.slice(0, 5);
+    if (g.releaseDate) e.d = g.releaseDate;
+    if (g.reviews?.total != null) e.r = [g.reviews.total, 70 + Math.floor(R() * 27)];
+    return [g.appid, e];
+  }));
+  const tagPool = [...TAGS, "Indie", "Singleplayer", "Pixel Graphics", "Atmospheric", "Relaxing", "Story Rich"];
+  let id = 9500000;
+  while (entries.size < data.games.length + 1500) {
+    const name = `${pick(A)} ${pick(B)}${R() < 0.2 ? " " + pick(["Deluxe", "Origins", "Redux", "Zero"]) : ""}${R() < 0.3 ? " " + Math.floor(2 + R() * 7) : ""}`;
+    if (taken.has(name)) continue;
+    taken.add(name);
+    id += 1 + Math.floor(R() * 30);
+    const e = { a: id, n: name, t: [...new Set([pick(TAGS), ...Array.from({ length: 2 + Math.floor(R() * 3) }, () => pick(tagPool))])] };
+    if (R() < 0.2) { e.u = 1; e.d = R() < 0.5 ? day(10 + Math.floor(R() * 400)) : pick(["Q1 2027", "Q2 2027", "2027", "Coming soon"]); }
+    else { e.d = day(-Math.floor(20 + R() * 1000)); e.p = pick([0, 2.99, 4.99, 9.99, 14.99, 19.99]); e.r = [Math.floor(Math.exp(2 + R() * 9)), Math.floor(55 + R() * 43)]; }
+    entries.set(id, e);
+  }
+  return { generatedAt: data.generatedAt, source: "sample", format: 2, keys: { a: "appid", n: "name", u: "1 when the game is not released yet (omitted otherwise)", t: "up to 5 tag names, most voted first", p: "price in USD (omitted when unknown)", d: "release date: ISO yyyy-mm-dd or Steam's own text such as 'Q2 2027'", r: "[review total, positive %] (omitted when unknown)" }, games: [...entries.values()].sort((x, y) => x.a - y.a) };
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const a = parseArgs(process.argv.slice(2));
   const here = dirname(fileURLToPath(import.meta.url));
@@ -146,4 +178,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   if (errs.length) { console.error(errs.join("\n")); process.exit(1); }
   writeJsonAtomic(out, c);
   console.log(`wrote ${out}: ${c.creators.length} creators, ${c.games.length} games`);
+  const catOut = resolve(dirname(out), "catalog.json");
+  writeJsonAtomic(catOut, makeSampleCatalog(c));
+  console.log(`wrote ${catOut}`);
 }

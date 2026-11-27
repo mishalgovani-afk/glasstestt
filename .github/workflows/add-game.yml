@@ -1,0 +1,45 @@
+# Fast-track specific games (~10 min): fetch just those games plus similar indies to compare with,
+# find creators for them, save into the `data` branch, republish the site.
+name: Add game
+
+on:
+  workflow_dispatch:
+    inputs:
+      games:
+        description: "Steam appids or names, comma-separated"
+        required: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: add-game
+  cancel-in-progress: false
+
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ADD_DEADLINE_MIN: "10"
+      GAMES: ${{ inputs.games }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Load saved live data
+        run: .github/scripts/seed-data.sh _data
+      - name: Page Doctor data for these games
+        run: node apps/page-doctor/scripts/add-game.mjs --games "$GAMES" --out _new/page-doctor --base _data
+      - name: Creators for these games
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: node apps/creator-match/scripts/add-game.mjs --games "$GAMES" --out _new/creator-match --corpus _new/page-doctor/corpus.json --base _data
+      - name: Save
+        run: |
+          NEW_DIR=_new .github/scripts/commit-data.sh "Add game - $GAMES"
+      - name: Republish site
+        run: gh workflow run pages.yml --ref main -R "$GITHUB_REPOSITORY"

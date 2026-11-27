@@ -14,7 +14,8 @@ import {
   buildGameIndex, matchGamesInTitle, buildTagAffinity, selectCurators, toIso,
 } from "../scripts/parsers.mjs";
 import { validateCreators } from "../scripts/validate.mjs";
-import { makeSample } from "../scripts/make-sample.mjs";
+import { makeSample, makeSampleCatalog } from "../scripts/make-sample.mjs";
+import { mergeCreators } from "../scripts/merge-data.mjs";
 import { curatorToCreator } from "../scripts/fetch-creators.mjs";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -211,6 +212,7 @@ test("committed data/creators.json is valid and realistic", () => {
     assert.ok(c.games.some((g) => g.comingSoon === true && g.reviews.total === null) && c.games.some((g) => g.reviews.total > 5000), "games carry reviews/comingSoon/releaseDate");
     assert.ok(c.games.every((g) => g.releaseDate && typeof g.comingSoon === "boolean" && g.reviews));
     assert.ok(c.creators.some((x) => x.links.length >= 3));
+    assert.ok(c.creators.every((x) => x.fetchedAt));
     assert.ok(c.creators.filter((x) => Date.now() - Date.parse(x.lastActive) < 0).length === 0);
   }
   for (const cr of c.creators) assert.ok(Object.keys(cr.tagAffinity).length > 0, `${cr.id} has tagAffinity`);
@@ -303,6 +305,7 @@ function mockServer() {
     }
     if ((m = u.pathname.match(/^\/curator\/(\d+)\/ajaxgetfilteredrecommendations\/$/))) {
       const n = Number(m[1]) - 40000000;
+      if (n > 50000000) return json({ success: 1, total_count: 0, results_html: "" }); // a curator that no longer has reviews
       const html = recsFor(n).map((a, k) => `<div class="recommendation" ><a data-ds-appid="${a}"><img alt="${GAME_NAMES[a]}"></a><div class="recommendation_stats"><span class='color_recommended'>Recommended</span> <span class="curator_review_date">${fmt(daysAgo(3 + k * 20))}</span></div><div class="recommendation_desc">Nice game ${k}</div></div>`).join("");
       return json({ success: 1, total_count: 4, results_html: html });
     }
@@ -317,6 +320,11 @@ function mockServer() {
       const n = Number(id.replace(/^UCx+/, ""));
       const entries = [0, 1, 2, 3].map((k) => `<entry><yt:videoId>v${n}k${k}</yt:videoId><title>${GAME_NAMES[3000001 + ((n + k) % 8)]} - review</title><published>${daysAgo(2 + k * 9).toISOString()}</published><media:group><media:community><media:statistics views="${1000 + k * 100}"/></media:community></media:group></entry>`).join("");
       return text(`<feed xmlns:yt="y" xmlns:media="m"><yt:channelId>${id}</yt:channelId><title>Channel ${n}</title>${entries}</feed>`, "application/atom+xml");
+    }
+    if (u.pathname === "/api/storesearch/") {
+      const term = (u.searchParams.get("term") || "").toLowerCase();
+      const hit = Object.entries(GAME_NAMES).find(([, n]) => n.toLowerCase() === term);
+      return json({ total: hit ? 1 : 0, items: hit ? [{ type: "app", id: Number(hit[0]), name: hit[1] }] : [] });
     }
     if (u.pathname === "/api/appdetails") {
       const id = Number(u.searchParams.get("appids"));
@@ -423,4 +431,144 @@ test("fetch-creators.mjs fails cleanly (exit 1, no output) when nothing is reach
     assert.equal(code, 1);
     assert.ok(!existsSync(join(dir, "o/creators.json")));
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("committed data/catalog.json (copy for the search box) is in the compact shared format", () => {
+  const c = readJson("data/catalog.json");
+  assert.equal(c.format, 2);
+  assert.ok(c.keys && c.keys.a && c.keys.n);
+  assert.ok(c.games.length >= 1000 && c.games.every((e) => Number.isFinite(e.a) && typeof e.n === "string" && e.n));
+  assert.equal(new Set(c.games.map((e) => e.a)).size, c.games.length);
+  assert.ok(c.games.some((e) => e.u === 1) && c.games.some((e) => e.t?.length >= 3 && e.r));
+  const games = readJson("data/creators.json").games;
+  const ids = new Set(c.games.map((e) => e.a));
+  for (const g of games) assert.ok(ids.has(g.appid), `catalog is missing creators.json game ${g.appid}`);
+  assert.deepEqual(makeSampleCatalog(makeSample()), makeSampleCatalog(makeSample()));
+});
+
+// ---------- persistent, growing data
+const cr = (id, fetchedAt, extra = {}) => ({ ...makeSample().creators.find((c) => c.platform === "youtube"), id, name: id, fetchedAt, coveredGames: [], tagAffinity: {}, ...extra });
+const live = (creators, games = [], generatedAt = "2026-11-01T00:00:00.000Z") => ({ generatedAt, source: "live", creators, games });
+const UCa = "youtube:UC" + "a".repeat(22), UCb = "youtube:UC" + "b".repeat(22), UCc = "youtube:UC" + "c".repeat(22);
+
+test("merge-data: newest fetchedAt wins per creator, union of creators and games, deterministic, sample never pollutes", () => {
+  const g = (appid, tags) => ({ appid, name: "G" + appid, tags });
+  const base = live([cr(UCa, "2026-10-01T00:00:00.000Z", { name: "old" }), cr(UCb, "2026-10-01T00:00:00.000Z")], [g(1, []), g(2, ["Cozy"])]);
+  const next = live([cr(UCa, "2026-11-01T00:00:00.000Z", { name: "new" }), cr(UCc, "2026-11-01T00:00:00.000Z"), cr(UCb, "2026-09-01T00:00:00.000Z", { name: "stale-copy" })], [g(1, ["Roguelike"]), g(3, ["Horror"]), g(2, [])], "2026-11-20T00:00:00.000Z");
+  const m = mergeCreators(base, next);
+  assert.deepEqual(m.creators.map((c) => c.id).sort(), [UCa, UCb, UCc].sort());
+  assert.equal(m.creators.find((c) => c.id === UCa).name, "new");
+  assert.equal(m.creators.find((c) => c.id === UCb).name, UCb, "an older copy does not overwrite a newer entry");
+  assert.deepEqual(m.games.map((x) => [x.appid, x.tags.length]), [[1, 1], [2, 1], [3, 1]], "the copy that has tags wins");
+  assert.equal(m.generatedAt, "2026-11-20T00:00:00.000Z");
+  assert.equal(JSON.stringify(mergeCreators(base, next)), JSON.stringify(m));
+  assert.equal(JSON.stringify(mergeCreators(next, base).creators.map((c) => [c.id, c.name])), JSON.stringify(m.creators.map((c) => [c.id, c.name])));
+  assert.deepEqual(validateCreators(m, { minCreators: 3 }), []);
+  assert.equal(mergeCreators(base, makeSample()).creators.length, 2);
+  assert.equal(mergeCreators(makeSample(), next).creators.length, 3);
+  assert.equal(mergeCreators(base, next, { max: 2 }).creators.length, 2);
+  assert.ok(!mergeCreators(base, next, { max: 2 }).creators.some((c) => c.id === UCb), "oldest fetchedAt is evicted first");
+});
+
+test("merge-data.mjs CLI is repeatable and works when the data branch has no file yet", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cm-merge-"));
+  try {
+    const b = join(dir, "b.json"), n = join(dir, "n.json"), o1 = join(dir, "o1.json"), o2 = join(dir, "o2.json");
+    writeFileSync(b, JSON.stringify(live([cr(UCa, "2026-10-01T00:00:00.000Z")])));
+    writeFileSync(n, JSON.stringify(live([cr(UCb, "2026-11-01T00:00:00.000Z")])));
+    const run = (base, out) => execFileSync(process.execPath, [join(APP, "scripts/merge-data.mjs"), "--base", base, "--new", n, "--out", out]);
+    run(b, o1); run(b, o2);
+    assert.equal(readFileSync(o1, "utf8"), readFileSync(o2, "utf8"));
+    assert.equal(JSON.parse(readFileSync(o1, "utf8")).creators.length, 2);
+    run(join(dir, "missing.json"), o2);
+    assert.equal(JSON.parse(readFileSync(o2, "utf8")).creators.length, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("build.sh seeds from DATA_DIR and copies the live Page Doctor catalog next to the creators", () => {
+  const { dir, dest } = tmpCopyOfApp();
+  try {
+    const dd = join(dir, "databranch");
+    execFileSync("mkdir", ["-p", join(dd, "creator-match"), join(dd, "page-doctor")]);
+    writeFileSync(join(dd, "creator-match/creators.json"), JSON.stringify({ ...readJson("data/creators.json"), source: "live" }, null, 2));
+    writeFileSync(join(dd, "page-doctor/catalog.json"), JSON.stringify({ ...readJson("data/catalog.json"), source: "live", games: [{ a: 1, n: "Only Live Game" }] }));
+    const out = execFileSync("bash", ["scripts/build.sh"], { cwd: dest, env: { ...process.env, SKIP_FETCH: "1", DATA_DIR: dd }, stdio: "pipe" }).toString();
+    assert.match(out, /seeded dist\/data\/creators.json/);
+    assert.match(out, /copied live catalog/);
+    assert.equal(JSON.parse(readFileSync(join(dest, "dist/data/creators.json"), "utf8")).source, "live");
+    assert.deepEqual(JSON.parse(readFileSync(join(dest, "dist/data/catalog.json"), "utf8")).games, [{ a: 1, n: "Only Live Game" }]);
+    // without a live catalog anywhere the committed sample catalog stays
+    const out2 = execFileSync("bash", ["scripts/build.sh"], { cwd: dest, env: { ...process.env, SKIP_FETCH: "1" }, stdio: "pipe" }).toString();
+    assert.ok(!/copied live catalog/.test(out2));
+    assert.equal(JSON.parse(readFileSync(join(dest, "dist/data/catalog.json"), "utf8")).source, "sample");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the creators fetcher is incremental: keeps previous creators, adds new ones, refreshes stale ones, drops gone ones", async () => {
+  const { server } = mockServer();
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "cm-inc-"));
+  try {
+    const env = { ...process.env, STEAM_STORE_BASE: base, STEAMSPY_BASE: base, YOUTUBE_BASE: base, YOUTUBE_API_BASE: base, STEAM_DELAY_MS: "0", STEAMSPY_DELAY_MS: "0", YOUTUBE_DELAY_MS: "0", HTTP_RETRIES: "0", CM_DEADLINE_MIN: "5" };
+    delete env.YOUTUBE_API_KEY;
+    const out = join(dir, "out");
+    const corpusFile = join(dir, "corpus.json");
+    writeFileSync(corpusFile, JSON.stringify({ generatedAt: new Date().toISOString(), source: "live", tagIndex: {}, games: Object.entries(GAME_NAMES).map(([id, name]) => ({ appid: Number(id), name, tags: [{ name: "Roguelike", votes: 9 }], reviews: { total: 10 }, comingSoon: false, releaseDate: "2025-01-01" })) }));
+    const args = (n) => ["--out", out, "--corpus", corpusFile, "--max-curators", String(n), "--directory-pages", "2", "--min-output", "5", "--no-youtube", "--watchlist", join(dir, "none.json")];
+    await runFetch(env, args(15));
+    const r1 = JSON.parse(readFileSync(join(out, "creators.json"), "utf8"));
+    const ids1 = new Set(r1.creators.map((c) => c.id));
+    assert.ok(ids1.size >= 10 && r1.creators.every((c) => c.fetchedAt));
+    // age everything; add one curator that vanished long ago and one that vanished recently
+    const longAgo = new Date(Date.now() - 100 * 86400000).toISOString(), weekAgo = new Date(Date.now() - 10 * 86400000).toISOString();
+    r1.creators = r1.creators.map((c) => ({ ...c, fetchedAt: weekAgo }));
+    const base0 = r1.creators.find((c) => c.platform === "steam-curator");
+    r1.creators.push({ ...base0, id: "curator:99999991", name: "Gone and old", fetchedAt: longAgo, url: "https://store.steampowered.com/curator/99999991/" }, { ...base0, id: "curator:99999992", name: "Gone but recent", fetchedAt: weekAgo, url: "https://store.steampowered.com/curator/99999992/" });
+    writeFileSync(join(out, "creators.json"), JSON.stringify(r1));
+    const log2 = await runFetch(env, args(30));
+    const r2 = JSON.parse(readFileSync(join(out, "creators.json"), "utf8"));
+    const ids2 = new Set(r2.creators.map((c) => c.id));
+    for (const id of ids1) assert.ok(ids2.has(id), `previous creator ${id} survived`);
+    assert.ok(r2.creators.length > ids1.size, "new creators were added");
+    assert.ok(r2.creators.some((c) => c.fetchedAt !== weekAgo && ids1.has(c.id)), "stale creators were re-read");
+    assert.ok(!ids2.has("curator:99999991"), "old creator with no reviews left was dropped");
+    assert.ok(ids2.has("curator:99999992"), "recently read creator is kept");
+    assert.match(log2, /dropping curator:99999991/);
+    assert.deepEqual(validateCreators(r2, { minCreators: 5 }), []);
+    // sample data is never built upon
+    writeFileSync(join(out, "creators.json"), JSON.stringify(makeSample()));
+    await runFetch(env, args(10));
+    assert.ok(!JSON.parse(readFileSync(join(out, "creators.json"), "utf8")).games.some((g) => g.appid >= 9400000), "no sample games leaked in");
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("add-game.mjs finds curators for requested games and writes a partial creators.json", async () => {
+  const { server } = mockServer();
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "cm-add-"));
+  try {
+    const corpusFile = join(dir, "corpus.json");
+    writeFileSync(corpusFile, JSON.stringify({ generatedAt: new Date().toISOString(), source: "live", tagIndex: {}, games: Object.entries(GAME_NAMES).map(([id, name]) => ({ appid: Number(id), name, tags: [{ name: "Roguelike", votes: 9 }, { name: "Indie", votes: 5 }], reviews: { total: 10 }, comingSoon: false, releaseDate: "2025-01-01" })) }));
+    const out = join(dir, "out");
+    const env = { ...process.env, STEAM_STORE_BASE: base, STEAMSPY_BASE: base, STEAM_DELAY_MS: "0", STEAMSPY_DELAY_MS: "0", HTTP_RETRIES: "0", ADD_DEADLINE_MIN: "4" };
+    const log = await new Promise((resolve, reject) => {
+      let buf = "";
+      const p = spawn(process.execPath, [join(APP, "scripts/add-game.mjs"), "--games", "Quiet Orchard,3000002,2876290", "--corpus", corpusFile, "--out", out, "--max-curators", "12", "--directory-pages", "2"], { env });
+      p.stdout.on("data", (d) => (buf += d)); p.stderr.on("data", (d) => (buf += d));
+      p.on("close", (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}\n${buf}`))));
+    });
+    assert.match(log, /summary/);
+    assert.match(log, /resolved 3/);
+    const r = JSON.parse(readFileSync(join(out, "creators.json"), "utf8"));
+    assert.deepEqual(validateCreators(r, { minCreators: 3 }), []);
+    assert.ok(r.creators.length >= 3 && r.creators.length <= 12);
+    assert.ok(r.creators.every((c) => c.fetchedAt && Object.keys(c.tagAffinity).length > 0));
+    const targets = r.games.filter((g) => [3000003, 3000002, 2876290].includes(g.appid));
+    assert.equal(targets.length, 3, "requested games are in games[]");
+    assert.ok(targets.every((g) => g.tags.length > 0));
+    assert.ok(r.creators.some((c) => c.coveredGames.some((g) => g.appid === 3000003)), "curators who reviewed a requested game were found");
+    assert.deepEqual(r.meta.addedGames.sort(), [2876290, 3000002, 3000003]);
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
 });
