@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  RULES, SOURCES, AREA_WEIGHTS, DEFAULT_MODEL, SHORT_DESC_MAX,
+  RULES, SOURCES, HYGIENE_RULES, AREA_WEIGHTS, DEFAULT_MODEL, SHORT_DESC_MAX,
   findComparables, diagnose, rewriteRequest, audit, normalizeGame, parseOwners, parseReleaseDate, toTags, tagKind, gradeFor,
 } from "../doctor.js";
 
@@ -74,6 +74,19 @@ const byId = (d) => Object.fromEntries(d.checks.map((c) => [c.id, c]));
 // ---------------------------------------------------------------------------------------------
 // Rules
 // ---------------------------------------------------------------------------------------------
+test("HYGIENE_RULES: https sources, known areas, unique ids; applied by game state", () => {
+  const ids = new Set();
+  for (const r of HYGIENE_RULES) {
+    assert.ok(!ids.has(r.id), r.id); ids.add(r.id);
+    assert.ok(Object.keys(AREA_WEIGHTS).includes(r.area), r.id);
+    assert.match(r.sourceUrl, /^https:\/\//, r.id);
+    assert.ok(r.title && r.detail);
+  }
+  const released = diagnose(strong, []).manualChecklist.map((m) => m.id);
+  assert.ok(!released.includes("hy-coming-soon-review"), "pre-launch items hidden for released games");
+  assert.ok(released.includes("hy-screens-all-ages"));
+});
+
 test("every RULES source is https, and every rule has a title, area and rule text", () => {
   assert.ok(RULES.length >= 15);
   for (const r of RULES) {
@@ -203,8 +216,15 @@ test("score formula is transparent: area scores combine with AREA_WEIGHTS", () =
   assert.equal(d.score, expect);
   assert.equal(d.grade, gradeFor(d.score));
   assert.ok(d.formula.includes("areaWeight"));
-  // manual checks never count
-  for (const ch of d.checks.filter((x) => x.manual)) assert.equal(ch.score, null);
+  // manual items live in manualChecklist, never in the scored checks
+  assert.ok(d.checks.every((x) => !x.manual));
+  const ml = Object.fromEntries(d.manualChecklist.map((m) => [m.id, m]));
+  assert.ok(ml["capsule-legibility"] && ml["media-first-screens"] && ml["hy-capsule-no-badges"]);
+  for (const m of d.manualChecklist) {
+    assert.ok(m.id && m.area && m.title && m.detail, m.id);
+    assert.match(m.sourceUrl, /^https:\/\//, m.id);
+  }
+  assert.equal(new Set(d.manualChecklist.map((m) => m.id)).size, d.manualChecklist.length, "no duplicate ids");
 });
 
 test("benchmarks are computed from comparables", () => {
@@ -253,8 +273,9 @@ test("manual unreleased game with only tags and a description", () => {
   assert.equal(d.prelaunch, true);
   assert.ok(d.score >= 0 && d.score <= 100);
   assert.ok(["A", "B", "C", "D", "F"].includes(d.grade));
-  assert.equal(c["capsule-assets"].manual, true, "no images known: manual, not a fail");
-  assert.equal(c["wishlist-readiness"].manual, true);
+  const ml = Object.fromEntries(d.manualChecklist.map((m) => [m.id, m]));
+  assert.equal(c["capsule-assets"], undefined, "no images known: a manual item, not a fail");
+  assert.ok(ml["capsule-assets"] && ml["wishlist-readiness"] && ml["hy-coming-soon-review"] && ml["hy-next-fest-once"]);
   assert.equal(c["page-live"].status, "warn");
   assert.match(c["page-live"].detail, /No Steam page yet/);
   assert.equal(c["desc-genre"].status, "pass");
@@ -390,4 +411,11 @@ test("works on every game in the committed corpus snapshot", { skip: !existsSync
     if (top && comps.length && comps.filter((c) => c.sharedTags.includes(top)).length >= 3) topTagHits++;
   }
   assert.ok(topTagHits >= snap.games.length * 0.7, `top tag shared for ${topTagHits}/${snap.games.length}`);
+});
+
+test("manual wishlist count is used as-is, not multiplied", () => {
+  const d = diagnose({ name: "W", tags: DECK_TAGS, wishlists: 7000 }, findComparables({ tags: DECK_TAGS }, corpus));
+  const w = d.checks.find((c) => c.id === "wishlist-readiness");
+  assert.match(w.detail, /^7,000 wishlists\./);
+  assert.notEqual(w.status, "fail");
 });

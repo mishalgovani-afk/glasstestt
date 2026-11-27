@@ -307,3 +307,4 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 .ec .keys .chip { padding: 2px 6px; gap: 4px; }
 .ec .keys .chip .x { font-size: var(--fs-1); padding: 0; white-space: nowrap; font-family: inherit; }
 .ec .keys .chip .x:last-child { font-size: var(--fs-3); }
+@media (max-width: 480px) { .tab { padding: 10px 8px; font-size: var(--fs-2); } }

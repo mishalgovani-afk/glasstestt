@@ -145,6 +145,54 @@ export const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 export const SHORT_DESC_MAX = 300;
 
+// General Steam store-page hygiene that applies to every game. Items that data can't verify go into
+// diagnosis.manualChecklist. `when`: "all" | "prelaunch" | "released" | "earlyAccess" | "demo".
+export const HYGIENE_RULES = [
+  { id: "hy-capsule-no-badges", area: "capsule", when: "all", title: "No review scores, awards or taglines on capsules",
+    detail: "Base capsules may only show game artwork, the game name and an official subtitle. Review scores, press quotes and award logos are not allowed; use the store page's accolade space instead.",
+    sourceUrl: S.steamAssetRules.url },
+  { id: "hy-asset-text-localized", area: "capsule", when: "all", title: "Text on images is localised",
+    detail: "Any text on a graphical asset must be localised into at least the same languages the game supports. Keep extra text off the capsule, or upload localised capsule versions.",
+    sourceUrl: S.steamAssetRules.url },
+  { id: "hy-screens-gameplay", area: "media", when: "all", title: "Screenshots show real gameplay",
+    detail: "Screenshots should show the game's actual gameplay (no concept art, renders or marketing banners), at least 1920x1080 at 16:9.",
+    sourceUrl: S.steamAssets.url },
+  { id: "hy-screens-all-ages", area: "media", when: "all", title: "4+ screenshots marked suitable for all ages",
+    detail: "If your content allows it, mark at least four screenshots as suitable for all ages in Steamworks. Without these flags the game may not appear in some store spaces even if it otherwise qualifies.",
+    sourceUrl: S.steamAssets.url },
+  { id: "hy-trailer-gameplay-first", area: "media", when: "all", title: "First trailer is gameplay",
+    detail: "Order trailers so the first one is primarily gameplay: Steam builds the auto-playing micro trailer from it. Label each trailer's category (gameplay, cinematic, teaser).",
+    sourceUrl: S.steamTrailer.url },
+  { id: "hy-coming-soon-review", area: "timing", when: "prelaunch", title: "Submit the Coming Soon page early",
+    detail: "Submit the store page for review at least 7 business days before you want it public, then press \"Post as Coming Soon\". It must be live at least 2 weeks before release.",
+    sourceUrl: S.steamComingSoon.url },
+  { id: "hy-release-date-lock", area: "timing", when: "prelaunch", title: "Release date locks 14 days out",
+    detail: "Once the page is live and the release date is within 14 days, you can't change it without contacting Valve. Pick a date you can hit.",
+    sourceUrl: S.steamComingSoon.url },
+  { id: "hy-next-fest-once", area: "timing", when: "prelaunch", title: "One Next Fest per game",
+    detail: "A game can take part in only one Steam Next Fest, needs a public store page, and its demo can't be a prologue or chapter of existing content. Choose the edition closest before launch.",
+    sourceUrl: S.steamNextFest.url },
+  { id: "hy-ea-yearly-update", area: "description", when: "earlyAccess", title: "Review the Early Access text yearly",
+    detail: "Keep the Early Access description showing the current state and up-to-date plans for 1.0; review it at least once a year.",
+    sourceUrl: S.steamEarlyAccess.url },
+  { id: "hy-store-localization", area: "languages", when: "all", title: "Localise the store page separately from the game",
+    detail: "Store page and in-game localisation are independent. Translate the short description, About section and capsule text for big markets even before the game itself is localised, then check regional wishlists.",
+    sourceUrl: S.steamLocalization.url },
+  { id: "hy-tag-wizard", area: "tags", when: "all", title: "Set tag weights in the tag wizard",
+    detail: "Use Steamworks' tag wizard (including Suggest Prioritization) to put your most accurate tags first; some store filters only look at the first 15.",
+    sourceUrl: S.steamTags.url },
+];
+
+function hygieneApplies(rule, g) {
+  switch (rule.when) {
+    case "prelaunch": return !!g.comingSoon;
+    case "released": return !g.comingSoon;
+    case "earlyAccess": return !!g.earlyAccess;
+    case "demo": return g.hasDemo === true;
+    default: return true;
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tag vocabulary
 // ---------------------------------------------------------------------------------------------
@@ -437,7 +485,7 @@ function genrePatternsForTag(tagName) {
  * Fills in a game from the corpus or from manual fields (a game with no Steam page yet).
  * Manual fields accepted: name, shortDescription, aboutText, tags (strings or {name, votes}), genres,
  * priceUSD, isFree, languages (array or comma string), screenshots (array or count) / screenshotCount,
- * movies (count) / hasTrailer (bool), releaseDate, hasDemo, followers, earlyAccess.
+ * movies (count) / hasTrailer (bool), releaseDate, hasDemo, followers, wishlists (the developer's own count), earlyAccess.
  */
 export function normalizeGame(game) {
   const g = game && typeof game === "object" ? game : {};
@@ -466,6 +514,7 @@ export function normalizeGame(game) {
     earlyAccess: g.earlyAccess === true,
     reviews: g.reviews && typeof g.reviews === "object" ? g.reviews : { total: null, positivePct: null, scoreDesc: null },
     followers: num(g.followers),
+    wishlists: num(g.wishlists),
   };
 }
 
@@ -1056,7 +1105,17 @@ export function diagnose(game, comparables, opts = {}) {
     } else if (!released) {
       // Pre-launch: no reviews yet, so wishlists are the social proof. Never a fail: it's early.
       const peers = comps.filter((c) => c.comingSoon && num(c.followers) != null);
-      if (followers != null) {
+      const wishlists = num(g.wishlists);
+      if (wishlists != null) {
+        // The developer's real wishlist count: compare with upcoming peers' followers x ~10.
+        const peerMed = peers.length >= 3 ? median(peers.map((c) => c.followers)) : null;
+        const r = peerMed != null ? ratioScore(wishlists, peerMed * 10) : null;
+        const st = r == null || r >= 0.7 ? "pass" : "warn";
+        checks.push(makeCheck("wishlist-readiness", st,
+          `${fmtInt(wishlists)} wishlists.${peerMed != null ? ` Upcoming comparable games median ${fmtInt(peerMed)} followers, which suggests roughly ${fmtInt(peerMed * 10)}-${fmtInt(peerMed * 12)} wishlists (GameDiscoverCo: unreleased games median 10-12x followers).` : ""}`,
+          "Grow wishlists before launch: release a demo, enter Steam festivals and Next Fest, and get creators in your genre to play it.",
+          { weight: r == null ? 0 : 0.7, score: r == null ? null : Math.max(0.5, r) }));
+      } else if (followers != null) {
         const est = `roughly ${fmtInt(followers * 10)}-${fmtInt(followers * 12)} wishlists (unreleased games median 10-12x followers, GameDiscoverCo)`;
         const peerMed = peers.length >= 3 ? median(peers.map((c) => c.followers)) : null;
         const r = peerMed != null ? ratioScore(followers, peerMed) : null;
@@ -1144,12 +1203,19 @@ export function diagnose(game, comparables, opts = {}) {
   const score = totalW ? Math.round(live.reduce((s, a) => s + a.weight * a.score, 0) / totalW) : 0;
   const grade = gradeFor(score);
 
+  const manualChecklist = [
+    ...checks.filter((c) => c.manual).map((c) => ({ id: c.id, area: c.area, title: c.title, detail: c.detail, fix: c.fix, sourceUrl: c.source })),
+    ...HYGIENE_RULES.filter((r) => hygieneApplies(r, g)).map((r) => ({ id: r.id, area: r.area, title: r.title, detail: r.detail, fix: null, sourceUrl: r.sourceUrl })),
+  ];
+  const autoChecks = checks.filter((c) => !c.manual);
+
   const diagnosis = {
     score,
     grade,
     areas,
-    formula: "score = sum(areaWeight x areaScore) / sum(areaWeight), over areas with at least one scored check. areaScore = weighted mean of its checks (pass 1, warn 0.5, fail 0, or a graded value). Manual checks are not scored.",
-    checks,
+    formula: "score = sum(areaWeight x areaScore) / sum(areaWeight), over areas with at least one scored check. areaScore = weighted mean of its checks (pass 1, warn 0.5, fail 0, or a graded value). Checks with weight 0 and the manual checklist are not scored.",
+    checks: autoChecks,
+    manualChecklist,
     tagSuggestions,
     benchmarks: b,
     comparables: comps.slice(0, 20).map((c) => {
