@@ -7,6 +7,7 @@ A splash page (`index.html`) that links to each small web app built so far. Ever
 | Hush | `apps/hush/` | Silent speech: mouth words at the camera, get text. On-device lip reading. |
 | P5R Fusion Calc | `apps/p5r-fusion/` | Persona 5 Royal reverse fusion calculator. |
 | Trump Tweets | `apps/trump-tweets/` | Running feed of @realDonaldTrump's Truth Social posts. |
+| Buzz Radar | `apps/buzz-radar/` | Finds bursts and clusters of social content for any video game and flags likely paid media buys. |
 | Back to Sea | `apps/back-to-sea/` | Mobile platformer: a fish hops between water sources through a house, back to the sea. |
 
 ## Run it locally
