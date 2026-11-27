@@ -305,3 +305,9 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 .ab .ab-w { display: none; }
 .ab .meter .track { background: var(--grid); height: 6px; }
 .ab .meter .val { font-size: var(--fs-2); }
+
+.banner.quick { margin-bottom: 14px; }
+.badge.nodata { color: var(--muted); }
+.need-data { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.need-data .check-item { grid-template-columns: 96px minmax(0, 1fr); }
+@media (max-width: 520px) { .need-data .check-item { grid-template-columns: 1fr; } }

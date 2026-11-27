@@ -134,7 +134,7 @@ const TONE_LABEL = { friendly: 'Friendly', professional: 'Professional', brief: 
 const PAGE = 12;
 
 const state = {
-  data: null, creatorsById: new Map(), tagUniverse: [],
+  data: null, creatorsById: new Map(), tagUniverse: [], catalogOnly: [],
   segMode: 'mine', formTags: [], picked: null,
   target: null, ranked: [], shown: PAGE,
   entries: [], keyPool: [], lastBackupAt: null,
@@ -144,6 +144,46 @@ const E = {
   dataLine: $('#dataLine'), banners: $('#banners'), results: $('#results'), cards: $('#cards'), moreBtn: $('#moreBtn'),
   goBtn: $('#goBtn'), goHint: $('#goHint'), drawer: $('#drawer'), scrim: $('#scrim'),
 };
+
+/* ---------- catalog (games known by name and basic tags only) ---------- */
+const QUICK_NOTE = "Quick result from limited data. Full data for this game is being compiled: ask in chat to fast-track it (about 10 minutes), otherwise it's added in the next daily refresh.";
+/** Reads one catalog row: the old compact [appid, name, "u"?] array or the newer object (long or short keys). */
+function normCatalogEntry(e, dict) {
+  const blank = { appid: null, name: '', upcoming: false, tags: [], priceUSD: null, releaseDate: '', reviews: { total: null, positivePct: null } };
+  const numOrNull = (v) => { const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v; return typeof n === 'number' && Number.isFinite(n) ? n : null; };
+  if (Array.isArray(e)) {
+    const appid = numOrNull(e[0]);
+    return appid && typeof e[1] === 'string' && e[1] ? { ...blank, appid, name: e[1], upcoming: e[2] === 'u' } : null;
+  }
+  if (!e || typeof e !== 'object') return null;
+  const pick = (...keys) => { for (const k of keys) if (e[k] !== undefined && e[k] !== null) return e[k]; return undefined; };
+  const appid = numOrNull(pick('appid', 'a', 'id')); const name = pick('name', 'n');
+  if (!appid || typeof name !== 'string' || !name) return null;
+  const up = pick('upcoming', 'u', 'comingSoon', 'cs');
+  let tags = pick('tags', 't', 'g') || [];
+  if (typeof tags === 'string') tags = tags.split(/[,;|]+/);
+  tags = (Array.isArray(tags) ? tags : []).map((t) => (typeof t === 'number' && dict ? dict[t] : typeof t === 'object' && t ? (t.name || t.n) : t)).map((t) => String(t == null ? '' : t).trim()).filter(Boolean);
+  let total = null; let pct = null; const r = pick('reviews', 'r');
+  if (Array.isArray(r)) { total = numOrNull(r[0]); pct = numOrNull(r[1]); }
+  else if (r && typeof r === 'object') { total = numOrNull(r.total ?? r.t ?? r.n ?? r.count); pct = numOrNull(r.positivePct ?? r.pct ?? r.p ?? r.pos); }
+  else if (r !== undefined) total = numOrNull(r);
+  const rd = pick('releaseDate', 'rd', 'date', 'd');
+  return { appid, name, upcoming: up === true || up === 1 || up === 'u' || up === '1', tags: tags.slice(0, 20),
+    priceUSD: numOrNull(pick('priceUSD', 'price', 'p')), releaseDate: typeof rd === 'string' ? rd : '', reviews: { total, positivePct: pct } };
+}
+async function loadCatalog() {
+  state.catalogOnly = [];
+  try {
+    const c = await loadJson('./data/catalog.json');
+    const dict = Array.isArray(c.tagNames) ? c.tagNames : Array.isArray(c.tagList) ? c.tagList : Array.isArray(c.tagDict) ? c.tagDict : null;
+    const have = new Set(state.data.games.map((g) => Number(g.appid)));
+    for (const row of Array.isArray(c.games) ? c.games : []) {
+      const e = normCatalogEntry(row, dict);
+      if (!e || have.has(e.appid)) continue;
+      have.add(e.appid); state.catalogOnly.push(e);
+    }
+  } catch { state.catalogOnly = []; }
+}
 
 /* ---------- persistence ---------- */
 function load() {
@@ -183,6 +223,7 @@ function save() {
     return;
   }
   for (const c of state.data.creators) state.creatorsById.set(c.id, c);
+  await loadCatalog();
   renderDataStatus(state.data, E.dataLine, E.banners, `${fmtInt(state.data.creators.length)} creators`);
   buildTagUniverse(); buildLanguageFilter();
   if (state.target) restoreTarget();
@@ -250,6 +291,7 @@ function buildTagUniverse() {
   const bump = (t, n) => { const k = String(t).trim().toLowerCase(); if (!k) return; if (!casing.has(k)) casing.set(k, String(t).trim()); counts.set(k, (counts.get(k) || 0) + n); };
   for (const g of state.data.games) for (const t of g.tags || []) bump(typeof t === 'object' ? t.name : t, 2);
   for (const c of state.data.creators) for (const t of Object.keys(c.tagAffinity || {})) bump(t, 1);
+  for (const g of state.catalogOnly) for (const t of g.tags) bump(t, 1);
   state.tagUniverse = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k]) => casing.get(k));
 }
 function addFormTag(raw) {
@@ -273,33 +315,45 @@ function renderTagPicker() {
 function renderGameList() {
   const q = $('#gameQ').value.trim().toLowerCase(); const ul = clear($('#gameList'));
   if (!q) return;
-  const hits = state.data.games.filter((g) => String(g.name).toLowerCase().includes(q)).sort((a, b) => (String(a.name).toLowerCase().startsWith(q) ? 0 : 1) - (String(b.name).toLowerCase().startsWith(q) ? 0 : 1) || String(a.name).localeCompare(String(b.name))).slice(0, 8);
+  const scored = [];
+  for (const g of [...state.data.games.map((x) => ({ ...x, limited: false })), ...state.catalogOnly.map((x) => ({ ...x, limited: true }))]) {
+    const name = String(g.name || '').toLowerCase(); const i = name.indexOf(q);
+    if (i < 0) continue;
+    // relevance first; on a tie, upcoming and small games before big ones
+    const big = g.limited ? (g.reviews && g.reviews.total >= 50000) : false;
+    scored.push({ g, s: name === q ? 0 : i === 0 ? 1 : /\W/.test(name[i - 1] || ' ') ? 2 : 3, ind: g.upcoming ? 0 : big ? 2 : 1 });
+  }
+  const hits = scored.sort((a, b) => a.s - b.s || a.ind - b.ind || String(a.g.name).localeCompare(String(b.g.name))).slice(0, 8).map((x) => x.g);
   if (!hits.length) { ul.append(h('li', { class: 'fine', text: 'Not in this dataset. Use "My game" and enter the name and tags instead.' })); return; }
-  for (const g of hits) ul.append(h('li', null, h('button', { type: 'button', onclick: () => pickGame(g) }, h('strong', { text: g.name }), h('span', { class: 'pl-meta', text: (g.tags || []).slice(0, 6).join(' · ') }))));
+  for (const g of hits) ul.append(h('li', null, h('button', { type: 'button', onclick: () => pickGame(g) }, h('strong', { text: g.name }),
+    h('span', { class: 'pl-meta', text: [g.upcoming ? 'Upcoming' : '', (g.tags || []).slice(0, 6).map((t) => (typeof t === 'object' ? t.name : t)).join(' · '), g.limited ? 'Quick result, limited data' : ''].filter(Boolean).join(' · ') }))));
 }
 function pickGame(g) {
-  state.picked = { appid: g.appid, name: g.name, tags: (g.tags || []).map((t) => (typeof t === 'object' ? t.name : t)) };
+  state.picked = { appid: g.appid, name: g.name, tags: (g.tags || []).map((t) => (typeof t === 'object' ? t.name : t)), limited: !!g.limited, upcoming: !!g.upcoming };
   clear($('#gameList')); $('#gameQ').value = g.name;
   const box = clear($('#gamePicked')); box.hidden = false;
-  box.append(h('h3', { text: state.picked.name }),
-    h('ul', { class: 'chips', 'aria-label': 'Tags' }, state.picked.tags.map((t) => h('li', { class: 'chip', text: t }))),
-    h('p', { class: 'fine', style: 'margin-top:8px' }, 'Creators who already covered this exact game are flagged for re-contact. ',
-      h('button', { type: 'button', class: 'linklike', onclick: editPickedAsMine, text: 'Edit as my own game' })));
+  const p = state.picked;
+  box.append(h('h3', { text: p.name }),
+    p.tags.length ? h('ul', { class: 'chips', 'aria-label': 'Tags' }, p.tags.map((t) => h('li', { class: 'chip', text: t }))) : h('p', { class: 'fine', text: 'No tags known yet for this game.' }),
+    p.limited ? h('p', { class: 'fine quick-note', style: 'margin-top:8px' }, h('strong', { text: 'Quick result from limited data. ' }), QUICK_NOTE.replace(/^Quick result from limited data\. /, ''),
+      p.tags.length ? ' Matching uses the tags above only.' : ' Add tags yourself to get matches.') : null,
+    h('p', { class: 'fine', style: 'margin-top:8px' }, p.limited ? '' : 'Creators who already covered this exact game are flagged for re-contact. ',
+      h('button', { type: 'button', class: 'linklike', onclick: editPickedAsMine, text: p.limited ? 'Edit tags yourself' : 'Edit as my own game' })));
   updateGo();
 }
 function editPickedAsMine() {
   const p = state.picked; if (!p) return;
-  $('#tName').value = p.name; state.formTags = p.tags.slice(0, 12); $('#tPre').checked = false; setSeg('mine'); renderTagPicker();
+  $('#tName').value = p.name; state.formTags = p.tags.slice(0, 12); $('#tPre').checked = !!p.upcoming; setSeg('mine'); renderTagPicker();
 }
 function updateGo() {
   if (!state.data) { E.goBtn.disabled = true; return; }
-  const ok = state.segMode === 'mine' ? state.formTags.length > 0 : !!state.picked;
+  const ok = state.segMode === 'mine' ? state.formTags.length > 0 : !!state.picked && state.picked.tags.length > 0;
   E.goBtn.disabled = !ok;
-  E.goHint.textContent = ok ? '' : (state.segMode === 'mine' ? 'Add at least one tag to find creators.' : 'Pick a game first.');
+  E.goHint.textContent = ok ? '' : (state.segMode === 'mine' ? 'Add at least one tag to find creators.' : state.picked ? 'This game has no tags yet. Use "Edit tags yourself".' : 'Pick a game first.');
 }
 function restoreTarget() {
   const t = state.target;
-  if (t.mode === 'steam' && t.appid != null) { state.picked = { appid: t.appid, name: t.name, tags: t.tags || [] }; setSeg('steam'); pickGame(state.picked); $('#gameQ').value = t.name; }
+  if (t.mode === 'steam' && t.appid != null) { state.picked = { appid: t.appid, name: t.name, tags: t.tags || [], limited: !!t.limited, upcoming: !!t.prelaunch }; setSeg('steam'); pickGame(state.picked); $('#gameQ').value = t.name; }
   else { $('#tName').value = t.name || ''; $('#tHook').value = t.hook || ''; $('#tPre').checked = t.prelaunch !== false; state.formTags = (t.tags || []).slice(); }
 }
 function onGo() {
@@ -307,7 +361,7 @@ function onGo() {
     state.target = { mode: 'mine', name: $('#tName').value.trim() || 'Your game', tags: state.formTags.slice(), hook: $('#tHook').value.trim(), prelaunch: $('#tPre').checked, appid: null };
   } else {
     const p = state.picked;
-    state.target = { mode: 'steam', name: p.name, tags: p.tags.slice(), hook: '', prelaunch: false, appid: p.appid };
+    state.target = { mode: 'steam', name: p.name, tags: p.tags.slice(), hook: '', prelaunch: !!p.upcoming, appid: p.appid, limited: !!p.limited };
   }
   state.shown = PAGE; save(); rerank(); E.results.hidden = false;
   $('#results').scrollIntoView({ block: 'start' });
@@ -342,6 +396,7 @@ function inShortlist(id) { return state.entries.some((e) => e.creatorId === id);
 function renderCards() {
   const t = state.target; const total = state.ranked.length;
   $('#resultTitle').textContent = `Creators for ${t.name}`;
+  $('#quickNote').hidden = !t.limited;
   $('#resultSub').textContent = total ? `${Math.min(state.shown, total)} of ${total} shown, best fit first. Tags used: ${t.tags.slice(0, 6).join(', ')}${t.tags.length > 6 ? '…' : ''}` : '';
   const root = clear(E.cards);
   if (!total) {
