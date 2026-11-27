@@ -22,6 +22,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -36,7 +37,10 @@ jobs:
       - name: Build site
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        run: ./scripts/build-site.sh
+        run: |
+          # Page Doctor first, so Creator Match can reuse its fresh Steam corpus.
+          (cd apps/page-doctor && ./scripts/build.sh)
+          REUSE_FETCHED=1 ./scripts/build-site.sh
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

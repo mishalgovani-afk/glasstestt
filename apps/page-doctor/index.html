@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Page Doctor</title>
+<meta name="description" content="Audit a Steam store page against similar successful games: scored checklist, tag suggestions and a rewrite prompt.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1b64be">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main>
+  <a class="back" href="../../">← My Webapps</a>
+  <header class="app-head">
+    <div>
+      <h1>Page Doctor</h1>
+      <p class="sub">Compare a Steam store page with similar successful games. Get a scored checklist, tag fixes and copy you can rewrite in minutes. No account or key needed.</p>
+    </div>
+    <p class="data-line" id="dataLine">Loading dataset…</p>
+  </header>
+  <div id="banners"></div>
+
+  <section class="card" id="pickCard" aria-labelledby="pickTitle">
+    <h2 id="pickTitle">Audit a store page</h2>
+    <div class="seg" role="tablist" aria-label="How to audit">
+      <button type="button" role="tab" id="tabManual" aria-controls="panelManual" aria-selected="true" class="seg-btn">
+        <span class="seg-t">My game</span><span class="seg-s">Not on Steam yet? Enter your page details</span>
+      </button>
+      <button type="button" role="tab" id="tabSearch" aria-controls="panelSearch" aria-selected="false" tabindex="-1" class="seg-btn">
+        <span class="seg-t">A game on Steam</span><span class="seg-s">Search by name, URL or appid</span>
+      </button>
+    </div>
+
+    <div id="panelManual" role="tabpanel" aria-labelledby="tabManual">
+      <p class="fine manual-intro">Works for any game, released or not, small or big. Nothing needs to be on Steam. Your details stay in this browser and are only compared with the dataset on this page.</p>
+      <form id="manualForm" novalidate>
+        <div class="field">
+          <label for="mName">Game name (optional)</label>
+          <input id="mName" type="text" maxlength="120" placeholder="Working title">
+        </div>
+        <div class="field">
+          <label for="mDesc">Short description <span class="count" id="mDescCount">0 characters</span></label>
+          <textarea id="mDesc" rows="3" maxlength="600" placeholder="The one or two sentences shown under your capsule on Steam"></textarea>
+        </div>
+        <div class="field">
+          <label for="mTagInput">Tags, most important first</label>
+          <div class="tag-entry">
+            <input id="mTagInput" type="text" list="tagList" placeholder="Type a tag, press Enter" autocomplete="off">
+            <button class="btn sm" type="button" id="mTagAdd">Add</button>
+          </div>
+          <datalist id="tagList"></datalist>
+          <ul class="chips" id="mTags" aria-label="Your tags"></ul>
+          <p class="fine">Order matters: Steam gives the first tags the most weight.</p>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label for="mPrice">Price in USD (0 = free)</label>
+            <input id="mPrice" type="number" min="0" step="0.01" inputmode="decimal" value="9.99">
+          </div>
+          <div class="field">
+            <label for="mShots">Screenshot count</label>
+            <input id="mShots" type="number" min="0" max="50" step="1" inputmode="numeric" value="5">
+          </div>
+          <div class="field">
+            <label for="mWish">Wishlists so far (optional)</label>
+            <input id="mWish" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 1200">
+          </div>
+          <div class="field">
+            <label for="mRelease">Release date or window (optional)</label>
+            <input id="mRelease" type="text" maxlength="40" placeholder="e.g. Q2 2027 or 2027-05-14">
+          </div>
+          <div class="field">
+            <span class="label">Trailer</span>
+            <label class="check"><input id="mTrailer" type="checkbox"> Has a trailer</label>
+          </div>
+          <div class="field">
+            <span class="label">Release</span>
+            <label class="check"><input id="mUnreleased" type="checkbox" checked> Not released yet</label>
+          </div>
+        </div>
+        <fieldset class="field lang-field">
+          <legend class="label">Supported languages (interface)</legend>
+          <ul class="chips" id="mLangs"></ul>
+        </fieldset>
+        <details class="field">
+          <summary>Add the long "About this game" text (optional)</summary>
+          <textarea id="mAbout" rows="6" maxlength="8000" placeholder="Paste your About text for a richer audit"></textarea>
+        </details>
+        <div class="btn-row">
+          <button class="btn primary" type="submit" id="mSubmit" disabled>Audit my page</button>
+          <button class="btn ghost" type="reset" id="mReset">Reset</button>
+        </div>
+        <p class="form-error" id="mError" role="alert" hidden></p>
+      </form>
+    </div>
+
+    <div id="panelSearch" role="tabpanel" aria-labelledby="tabSearch" hidden>
+      <form id="searchForm" autocomplete="off" role="search">
+        <label for="q">Game name, Steam URL or appid</label>
+        <div class="search-row">
+          <input id="q" name="q" type="search" placeholder="e.g. Hollow Keep, or store.steampowered.com/app/1000037" enterkeyhint="search" disabled>
+          <button class="btn primary" type="submit" disabled id="searchBtn">Audit</button>
+        </div>
+      </form>
+      <ul class="pick-list" id="pickList" aria-label="Matching games"></ul>
+      <div id="examples" class="examples" hidden>
+        <span class="label">Try one from today's dataset</span>
+        <ul class="chips" id="exampleChips"></ul>
+      </div>
+      <div id="notFound" class="note-box" role="status" hidden></div>
+    </div>
+  </section>
+
+  <div id="results" aria-live="polite"></div>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

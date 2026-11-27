@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Creator Match</title>
+<meta name="description" content="Find YouTubers, Steam curators and streamers who cover games like yours, draft personal pitches and track outreach and Steam keys.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#5a3fd6">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main>
+  <a class="back" href="../../">← My Webapps</a>
+  <header class="app-head">
+    <div>
+      <h1>Creator Match</h1>
+      <p class="sub">Find creators who already cover games like yours, send each one a personal pitch, and track replies and Steam keys. No account needed, and it works for games that are not on Steam yet.</p>
+    </div>
+    <p class="data-line" id="dataLine">Loading dataset…</p>
+  </header>
+  <div id="banners"></div>
+
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button type="button" role="tab" class="tab" id="tabFind" aria-controls="viewFind" aria-selected="true">Find creators</button>
+    <button type="button" role="tab" class="tab" id="tabBoard" aria-controls="viewBoard" aria-selected="false" tabindex="-1">Outreach board <span class="tab-count" id="boardCount">0</span></button>
+    <button type="button" role="tab" class="tab" id="tabGuide" aria-controls="viewGuide" aria-selected="false" tabindex="-1">How to pitch</button>
+  </div>
+
+  <!-- FIND -->
+  <section id="viewFind" role="tabpanel" aria-labelledby="tabFind">
+    <div class="card" aria-labelledby="targetTitle">
+      <h2 id="targetTitle">Your game</h2>
+      <div class="seg" role="tablist" aria-label="How to describe your game">
+        <button type="button" role="tab" class="seg-btn" id="segMine" aria-controls="paneMine" aria-selected="true">
+          <span class="seg-t">My game</span><span class="seg-s">Not on Steam yet? Enter a name and tags</span>
+        </button>
+        <button type="button" role="tab" class="seg-btn" id="segSteam" aria-controls="paneSteam" aria-selected="false" tabindex="-1">
+          <span class="seg-t">A game on Steam</span><span class="seg-s">Pick one from the dataset</span>
+        </button>
+      </div>
+
+      <div id="paneMine" role="tabpanel" aria-labelledby="segMine">
+        <div class="field-grid wide">
+          <div class="field">
+            <label for="tName">Game name</label>
+            <input id="tName" type="text" maxlength="100" placeholder="Working title is fine" autocomplete="off">
+          </div>
+          <div class="field">
+            <label class="check inline"><input id="tPre" type="checkbox" checked> Not released yet</label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="tHook">One-line pitch (optional)</label>
+          <input id="tHook" type="text" maxlength="200" placeholder="e.g. A cozy roguelike where you run a haunted bakery" autocomplete="off">
+          <p class="fine">Used in your pitch emails as the hook.</p>
+        </div>
+        <div class="field">
+          <label for="tagFilter">Tags, most important first</label>
+          <div id="tagSelected" class="chips" aria-label="Selected tags"></div>
+          <input id="tagFilter" type="search" placeholder="Search or type a tag, press Enter to add" autocomplete="off" enterkeyhint="done">
+          <ul id="tagChoices" class="chips tag-choices" aria-label="Tag suggestions"></ul>
+          <p class="fine">Pick 3 to 8 tags. The first ones weigh most when matching creators.</p>
+        </div>
+      </div>
+
+      <div id="paneSteam" role="tabpanel" aria-labelledby="segSteam" hidden>
+        <label for="gameQ">Search games in the dataset</label>
+        <input id="gameQ" type="search" placeholder="Type a game name" autocomplete="off">
+        <ul id="gameList" class="pick-list" aria-label="Matching games"></ul>
+        <div id="gamePicked" class="picked" hidden></div>
+      </div>
+
+      <div class="btn-row go-row">
+        <button type="button" class="btn primary" id="goBtn" disabled>Find creators</button>
+        <span class="fine" id="goHint"></span>
+      </div>
+    </div>
+
+    <div id="results" hidden>
+      <div class="card filters" aria-labelledby="filtTitle">
+        <h2 id="filtTitle" class="sr-only">Filters</h2>
+        <div class="filter-grid">
+          <div class="field"><label for="fPlatform">Platform</label>
+            <select id="fPlatform"><option value="">All platforms</option><option value="youtube">YouTube</option><option value="steam-curator">Steam curators</option><option value="twitch">Twitch</option></select></div>
+          <div class="field"><label for="fTier">Size</label>
+            <select id="fTier"><option value="">All sizes</option><option value="micro">Micro (under 10K)</option><option value="small">Small (10K to 50K)</option><option value="mid">Mid (50K to 250K)</option><option value="large">Large (250K+)</option></select></div>
+          <div class="field"><label for="fLang">Language</label>
+            <select id="fLang"><option value="">Any language</option></select></div>
+          <div class="field"><label for="fActive">Active within</label>
+            <select id="fActive"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="180">180 days</option><option value="365">1 year</option><option value="0">Any time</option></select></div>
+        </div>
+      </div>
+      <div class="result-head"><h2 id="resultTitle">Creators</h2><p class="fine" id="resultSub"></p></div>
+      <div id="cards" class="cards" aria-live="polite"></div>
+      <div class="btn-row more-row"><button type="button" class="btn" id="moreBtn" hidden>Show more</button></div>
+    </div>
+  </section>
+
+  <!-- BOARD -->
+  <section id="viewBoard" role="tabpanel" aria-labelledby="tabBoard" hidden>
+    <div class="banner warn-local" role="note">
+      <span class="ico" aria-hidden="true">!</span>
+      <div><strong>This board lives only in this browser.</strong> Notes, stages and Steam keys are saved on this device, not on a server. Clearing site data, using a private window, or switching browser or device loses them. Export a JSON backup now and then. <span id="backupNote"></span></div>
+    </div>
+    <div id="storageWarn"></div>
+
+    <div class="card">
+      <div class="card-head"><h2>Pipeline</h2>
+        <div class="btn-row">
+          <button type="button" class="btn sm" id="expCsv">Export CSV</button>
+          <button type="button" class="btn sm" id="expJson">Export JSON backup</button>
+          <button type="button" class="btn sm" id="impBtn">Import JSON</button>
+          <input type="file" id="impFile" accept="application/json,.json" hidden>
+        </div>
+      </div>
+      <div id="importMsg" role="status"></div>
+      <div id="stats"></div>
+    </div>
+
+    <div class="board-side">
+      <div class="card" aria-labelledby="fuTitle">
+        <div class="card-head"><h2 id="fuTitle">Follow-ups due</h2>
+          <label class="fu-days">Wait <select id="fuDays" aria-label="Days to wait before following up"><option value="3">3</option><option value="5">5</option><option value="7" selected>7</option><option value="10">10</option><option value="14">14</option></select> days</label></div>
+        <div id="fuList"></div>
+      </div>
+      <div class="card" aria-labelledby="poolTitle">
+        <div class="card-head"><h2 id="poolTitle">Steam key pool</h2><span class="fine" id="poolCount"></span></div>
+        <label for="poolInput">Paste keys, one per line</label>
+        <textarea id="poolInput" rows="3" spellcheck="false" placeholder="AAAAA-BBBBB-CCCCC"></textarea>
+        <div class="btn-row" style="margin-top:8px"><button type="button" class="btn sm primary" id="poolAdd">Add to pool</button><button type="button" class="btn sm ghost" id="poolShow" aria-expanded="false">Show keys</button></div>
+        <p class="fine" id="poolMsg" role="status"></p>
+        <ul id="poolList" class="pool-list" hidden></ul>
+      </div>
+    </div>
+
+    <div id="boardEmpty" class="card empty-board" hidden>
+      <h2>No creators on your board yet</h2>
+      <p>Use <strong>Add to shortlist</strong> on a creator card in <button type="button" class="linklike" id="goFind">Find creators</button>, or import a backup.</p>
+    </div>
+    <div id="board" class="board" aria-label="Outreach board"></div>
+  </section>
+
+  <!-- GUIDE -->
+  <section id="viewGuide" role="tabpanel" aria-labelledby="tabGuide" hidden>
+    <div class="card"><div class="card-head"><h2>How to pitch</h2><span class="fine">What the ranking and the pitch drafts are based on</span></div><div id="guide"></div></div>
+  </section>
+</main>
+
+<!-- Pitch drawer -->
+<div id="scrim" class="scrim" hidden></div>
+<aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" hidden tabindex="-1">
+  <div class="drawer-head">
+    <div><h2 id="drawerTitle">Pitch</h2><p class="fine" id="drawerSub"></p></div>
+    <button type="button" class="btn sm" id="drawerClose" aria-label="Close pitch drawer">Close</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

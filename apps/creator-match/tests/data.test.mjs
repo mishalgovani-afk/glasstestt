@@ -1,0 +1,400 @@
+// Data pipeline tests for Creator Match: parsers on fixtures, snapshot schema, build.sh fallback, end-to-end fetch against a mock server.
+// Run: node --test apps/creator-match/tests/data.test.mjs   (Node 22, no network)
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, writeFileSync, mkdtempSync, cpSync, existsSync, rmSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  parseCuratorDate, extractJsonArrayAfter, parseCuratorDirectory, parseRecommendations, parseCuratorPage, unwrapLinkfilter, linksFromText,
+  parseYouTubeUrl, parseChannelIdFromHtml, parseYouTubeFeed, uploadsPerMonth, averageViews, parseYtSearch, parseYtChannels, parseYtVideos,
+  buildGameIndex, matchGamesInTitle, buildTagAffinity, selectCurators, toIso,
+} from "../scripts/parsers.mjs";
+import { validateCreators } from "../scripts/validate.mjs";
+import { makeSample } from "../scripts/make-sample.mjs";
+import { curatorToCreator } from "../scripts/fetch-creators.mjs";
+
+const APP = join(dirname(fileURLToPath(import.meta.url)), "..");
+const readJson = (p) => JSON.parse(readFileSync(join(APP, p), "utf8"));
+
+// ---------- fixtures (structures taken from real curator pages / documented feeds)
+const DIRECTORY_HTML = `<div class="curators_ctn"><script type="text/javascript">
+var g_rgTopCurators = [{"clanID":"40153535","name":"Dachi","link":"https:\\/\\/store.steampowered.com\\/curator\\/40153535-Dachi\\/","strAvatarHash":"f99d2107a218b0a76bb4e23a648ca5db99ec8ed1","total_followers":1520,"total_reviews":88,"total_recommended":80,"last_curation_date":1790000000,"curator_description":"Indie fan [brackets ] in text. Videos: https:\\/\\/www.youtube.com\\/@dachiplays mail dachi@example.com","communityLink":"https:\\/\\/steamcommunity.com\\/groups\\/Dach1","m_rgAppRecommendations":[{"appid":1100001,"recommendation_state":0,"time_recommended":1789000000,"blurb":"Great &amp; tight","link_url":"https:\\/\\/store.steampowered.com\\/curator\\/40153535\\/review\\/1"},{"appid":1100002,"recommendation_state":1,"time_recommended":1788000000,"blurb":"Nope"}]},
+{"clanID":44856946,"name":"Z_CY","link":"https:\\/\\/store.steampowered.com\\/curator\\/44856946-Z_CY\\/","strAvatarHash":"","total_followers":"310","last_curation_date":"1780000000"}];
+</script></div>`;
+const RECS_HTML = `<div data-panel="{}" role="button" class="recommendation" ><div><a data-ds-appid="1100001" data-ds-itemkey="App_1100001" class="store_capsule price_inline" href="x"><div class="capsule"><img src="https://img/1.jpg" alt="Lantern &amp; Thorn"></div></a></div>
+<a class="recommendation_link" href="https://store.steampowered.com/curator/40153535/review/1?snr=1"><div class="recommendation_midcol"><div class="recommendation_stats"><div class="recommendation_type_ctn"><img src='https://x/ico_curator_up.png'> <span class='color_recommended'>Recommended</span> <span class="curator_review_date">22 September, 2026</span></div></div><div class="recommendation_desc"> You carry a lantern. It is &quot;great&quot;. </div></div></a><a class="recommendation_readmore" href="https://store.steampowered.com/curator/40153535/review/1">Read more</a></div>
+<div data-panel="{}" role="button" class="recommendation" ><a data-ds-appid="1100002" href="x"><img src="https://img/2.jpg" alt="Mossgrave"></a><a class="recommendation_link"><div class="recommendation_stats"><span class='color_not_recommended'>Not Recommended</span> <span class="curator_review_date">3 March, 2026</span></div><div class="recommendation_desc">Meh.</div></a></div>
+<div data-panel="{}" role="button" class="recommendation" ><a data-ds-appid="1100003" href="x"><img src="https://img/3.jpg" alt="Quiet Orchard"></a><a class="recommendation_link"><div class="recommendation_stats"><span class='color_informational'>Informational</span> <span class="curator_review_date">5 June</span></div><div class="recommendation_desc">A demo.</div></a></div>`;
+const CURATOR_PAGE = `<div class="header_area"><a href="x"><img class="curator_avatar" src="https://avatars.akamai.steamstatic.com/f99d_full.jpg"></a><h2 class="pageheader curator_name"><a data-panel="{}" href="https://store.steampowered.com/curator/40153535-Dachi/">Dachi</a></h2>
+<div data-panel="{&quot;flow-children&quot;:&quot;row&quot;}" class="socialmedia_accounts">
+<span><a class="curator_url ttip" href="https://steamcommunity.com/linkfilter/?u=https%3A%2F%2Fwww.youtube.com%2F%40dachiplays" target="_blank">www.youtube.com/@dachiplays</a></span>
+<a href="https://steamcommunity.com/linkfilter/?u=https%3A%2F%2Fdachi.example%2F"><img src="x" alt="Website: Dachi"></a>
+<a href="mailto:dachi@example.com">mail</a>
+<a href="https://steamcommunity.com/linkfilter/?u=http%3A%2F%2Fx.com%2Fdachi"><img alt="X: dachi"></a>
+<a class="curator_url" href="https://store.steampowered.com/curator/40153535-Dachi/">Dachi</a>
+</div>
+<div class="follow_btn_stats"><div class="num_followers" id="CuratorNumFollowers_40153535">1,520</div></div></div>
+<script>var g_strCuratorCommunityBaseURL = "https:\\/\\/steamcommunity.com\\/groups\\/Dach1";</script>
+<div class="footer"><a href="https://steamcommunity.com/linkfilter/?u=http%3A%2F%2Fwww.facebook.com%2FSteam"><img alt="Facebook: Steam"></a></div>`;
+const UC1 = "UCabcdefghijklmnopqrstuv"; // UC + 22 chars
+const FEED = `<?xml version="1.0" encoding="UTF-8"?><feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/" xmlns="http://www.w3.org/2005/Atom"><link rel="self" href="http://www.youtube.com/feeds/videos.xml?channel_id=${UC1}"/><id>yt:channel:${UC1.slice(2)}</id><yt:channelId>${UC1}</yt:channelId><title>Dachi Plays</title><link rel="alternate" href="https://www.youtube.com/channel/${UC1}"/><author><name>Dachi Plays</name><uri>https://www.youtube.com/channel/${UC1}</uri></author><published>2020-01-01T00:00:00+00:00</published>
+<entry><id>yt:video:vid00000001</id><yt:videoId>vid00000001</yt:videoId><yt:channelId>${UC1}</yt:channelId><title>Lantern &amp; Thorn - first impressions</title><link rel="alternate" href="https://www.youtube.com/watch?v=vid00000001"/><author><name>Dachi Plays</name></author><published>2026-11-20T10:00:00+00:00</published><updated>2026-11-21T10:00:00+00:00</updated><media:group><media:title>x</media:title><media:community><media:starRating count="12" average="5.00" min="1" max="5"/><media:statistics views="12000"/></media:community></media:group></entry>
+<entry><id>yt:video:vid00000002</id><yt:videoId>vid00000002</yt:videoId><title>Hades II vs Hades: which is better?</title><published>2026-11-10T10:00:00+00:00</published><media:group><media:community><media:statistics views="8000"/></media:community></media:group></entry>
+<entry><id>yt:video:vid00000003</id><yt:videoId>vid00000003</yt:videoId><title>Unrelated vlog</title><published>2026-10-21T10:00:00+00:00</published><media:group><media:community><media:statistics views="4000"/></media:community></media:group></entry></feed>`;
+
+// ---------- parser tests
+test("parseCuratorDate handles full dates, no-year dates and junk", () => {
+  const now = new Date("2026-11-27T00:00:00Z");
+  assert.equal(parseCuratorDate("22 September, 2014", now), "2014-09-22T00:00:00.000Z");
+  assert.equal(parseCuratorDate("Nov 3, 2025", now), "2025-11-03T00:00:00.000Z");
+  assert.equal(parseCuratorDate("5 June", now), "2026-06-05T00:00:00.000Z");
+  assert.equal(parseCuratorDate("20 December", now), "2025-12-20T00:00:00.000Z"); // would be in the future, so last year
+  assert.equal(parseCuratorDate("", now), null);
+  assert.equal(parseCuratorDate("yesterday", now), null);
+  assert.equal(toIso(1790000000), "2026-09-21T14:13:20.000Z");
+});
+
+test("extractJsonArrayAfter survives brackets inside strings and bad input", () => {
+  assert.deepEqual(extractJsonArrayAfter('x = [{"a":"]["}, 2]; y=[3]', "x ="), [{ a: "][" }, 2]);
+  assert.equal(extractJsonArrayAfter("nothing", "x ="), null);
+  assert.equal(extractJsonArrayAfter("x = [1,2", "x ="), null);
+});
+
+test("parseCuratorDirectory reads g_rgTopCurators (string and numeric ids, missing fields)", () => {
+  const { curators, total } = parseCuratorDirectory({ success: 1, results_html: DIRECTORY_HTML, total_count: 15234 });
+  assert.equal(total, 15234);
+  assert.equal(curators.length, 2);
+  const d = curators[0];
+  assert.equal(d.id, "40153535");
+  assert.equal(d.name, "Dachi");
+  assert.equal(d.followers, 1520);
+  assert.equal(d.avatar, "https://avatars.fastly.steamstatic.com/f99d2107a218b0a76bb4e23a648ca5db99ec8ed1_full.jpg");
+  assert.equal(d.lastActive, "2026-09-21T14:13:20.000Z");
+  assert.equal(d.communityUrl, "https://steamcommunity.com/groups/Dach1");
+  assert.equal(d.recent.length, 2);
+  assert.deepEqual(d.recent.map((r) => r.verdict), ["recommended", "not_recommended"]);
+  assert.equal(d.recent[0].blurb, "Great & tight");
+  assert.equal(curators[1].id, "44856946");
+  assert.equal(curators[1].followers, 310);
+  assert.equal(curators[1].avatar, null);
+  assert.deepEqual(parseCuratorDirectory({ results_html: "<div>nothing</div>" }).curators, []);
+  assert.deepEqual(parseCuratorDirectory(null).curators, []);
+});
+
+test("parseRecommendations extracts appid, name, verdict, date, blurb and link", () => {
+  const now = new Date("2026-11-27T00:00:00Z");
+  const r = parseRecommendations(RECS_HTML, now);
+  assert.equal(r.length, 3);
+  assert.deepEqual(r[0], { appid: 1100001, name: "Lantern & Thorn", verdict: "recommended", date: "2026-09-22T00:00:00.000Z", blurb: 'You carry a lantern. It is "great".', link: "https://store.steampowered.com/curator/40153535/review/1" });
+  assert.equal(r[1].verdict, "not_recommended");
+  assert.equal(r[2].verdict, "informational");
+  assert.equal(r[2].date, "2026-06-05T00:00:00.000Z");
+  assert.deepEqual(parseRecommendations("", now), []);
+});
+
+test("parseCuratorPage keeps only the curator's own public links (no footer, no mailto, no Steam links)", () => {
+  const p = parseCuratorPage(CURATOR_PAGE);
+  assert.equal(p.name, "Dachi");
+  assert.equal(p.followers, 1520);
+  assert.equal(p.avatar, "https://avatars.akamai.steamstatic.com/f99d_full.jpg");
+  assert.deepEqual(p.links, [
+    { label: "YouTube", url: "https://www.youtube.com/@dachiplays" },
+    { label: "Website", url: "https://dachi.example/" },
+    { label: "X / Twitter", url: "https://x.com/dachi" },
+  ]);
+  assert.equal(p.communityUrl, "https://steamcommunity.com/groups/Dach1");
+  assert.ok(!JSON.stringify(p).includes("mailto") && !JSON.stringify(p).includes("@example.com"));
+  assert.deepEqual(parseCuratorPage("<html></html>").links, []);
+});
+
+test("link helpers never return emails, http or Steam-internal links", () => {
+  assert.equal(unwrapLinkfilter("https://steamcommunity.com/linkfilter/?u=https%3A%2F%2Fa.example%2Fx"), "https://a.example/x");
+  assert.equal(unwrapLinkfilter("mailto:me@a.example"), null);
+  assert.equal(unwrapLinkfilter("javascript:alert(1)"), null);
+  assert.equal(unwrapLinkfilter("https://steamcommunity.com/linkfilter/?u=ftp%3A%2F%2Fa.example"), null);
+  const l = linksFromText("Find me https://twitch.tv/dachi, https://store.steampowered.com/x and bob@mail.example plus http://site.example/a.");
+  assert.deepEqual(l.map((x) => x.url), ["https://twitch.tv/dachi", "https://site.example/a"]);
+  assert.equal(l[0].label, "Twitch");
+});
+
+test("YouTube helpers: url kinds, channel id from HTML, feed parsing, stats", () => {
+  assert.deepEqual(parseYouTubeUrl(`https://www.youtube.com/channel/${UC1}`), { kind: "channel", value: UC1 });
+  assert.deepEqual(parseYouTubeUrl("https://youtube.com/@dachiplays/videos"), { kind: "handle", value: "@dachiplays" });
+  assert.deepEqual(parseYouTubeUrl("https://www.youtube.com/user/oldname"), { kind: "user", value: "oldname" });
+  assert.deepEqual(parseYouTubeUrl("https://www.youtube.com/c/CustomName"), { kind: "custom", value: "CustomName" });
+  assert.equal(parseYouTubeUrl("https://www.youtube.com/watch?v=abc"), null);
+  assert.equal(parseYouTubeUrl("https://example.com/@x"), null);
+  assert.equal(parseChannelIdFromHtml(`<link rel="canonical" href="https://www.youtube.com/channel/${UC1}">`), UC1);
+  assert.equal(parseChannelIdFromHtml(`..."externalId":"${UC1}","x"...`), UC1);
+  assert.equal(parseChannelIdFromHtml("<html>consent</html>"), null);
+  const f = parseYouTubeFeed(FEED);
+  assert.equal(f.channelId, UC1);
+  assert.equal(f.title, "Dachi Plays");
+  assert.equal(f.entries.length, 3);
+  assert.deepEqual(f.entries[0], { videoId: "vid00000001", title: "Lantern & Thorn - first impressions", published: "2026-11-20T10:00:00.000Z", link: "https://www.youtube.com/watch?v=vid00000001", views: 12000 });
+  assert.equal(averageViews(f.entries), 8000);
+  assert.equal(uploadsPerMonth(f.entries), 2); // 2 gaps over 30 days (~2.03 per 30.4 days)
+  assert.equal(uploadsPerMonth([]), null);
+  assert.deepEqual(parseYouTubeFeed("garbage").entries, []);
+});
+
+test("YouTube Data API parsers", () => {
+  const s = parseYtSearch({ items: [{ id: { videoId: "v1" }, snippet: { channelId: UC1, channelTitle: "Dachi &amp; Co", title: "T", publishedAt: "2026-11-01T00:00:00Z" } }, { id: { kind: "youtube#channel" }, snippet: {} }] });
+  assert.deepEqual(s, [{ videoId: "v1", channelId: UC1, channelTitle: "Dachi & Co", title: "T", published: "2026-11-01T00:00:00.000Z" }]);
+  const c = parseYtChannels({ items: [{ id: UC1, snippet: { title: "Dachi", thumbnails: { default: { url: "https://yt3/x.jpg" } }, defaultLanguage: "en" }, statistics: { subscriberCount: "12345" } }, { id: "UCsecret", snippet: { title: "H" }, statistics: { hiddenSubscriberCount: true, subscriberCount: "0" } }] });
+  assert.equal(c[UC1].subscribers, 12345);
+  assert.equal(c[UC1].avatar, "https://yt3/x.jpg");
+  assert.equal(c.UCsecret.subscribers, null);
+  assert.deepEqual(parseYtVideos({ items: [{ id: "v1", statistics: { viewCount: "999" } }] }), { v1: 999 });
+  assert.deepEqual(parseYtSearch({}), []);
+});
+
+test("game matching in video titles prefers the longest name and skips ambiguous names", () => {
+  const idx = buildGameIndex([{ appid: 1, name: "Hades" }, { appid: 2, name: "Hades II" }, { appid: 3, name: "Rust" }, { appid: 4, name: "Lantern & Thorn" }, { appid: 5, name: "Sky" }]);
+  assert.deepEqual(matchGamesInTitle("Hades II first look", idx).map((g) => g.appid), [2]);
+  assert.deepEqual(matchGamesInTitle("Hades II vs Hades", idx).map((g) => g.appid).sort(), [1, 2]);
+  assert.deepEqual(matchGamesInTitle("Lantern and Thorn review", idx).map((g) => g.appid), [4]); // "&" == "and"
+  assert.deepEqual(matchGamesInTitle("I trust my rustic Sky", idx), []);
+});
+
+test("buildTagAffinity: 0..1, strongest tag is 1, generic tags are damped, unknown games ignored", () => {
+  const games = new Map([[1, { tags: ["Roguelike", "Indie", "Deckbuilding"] }], [2, { tags: ["Roguelike", "Horror"] }], [3, { tags: [] }]]);
+  const a = buildTagAffinity([{ appid: 1 }, { appid: 2 }, { appid: 3 }, { appid: 99 }, { appid: null }, { appid: 1 }], games);
+  assert.equal(a.Roguelike, 1);
+  assert.ok(a.Indie < a.Deckbuilding, "Indie is generic and damped");
+  assert.ok(Object.values(a).every((w) => w >= 0 && w <= 1));
+  assert.ok(a.Horror > 0 && a.Horror < 1);
+  assert.deepEqual(buildTagAffinity([], games), {});
+});
+
+test("selectCurators mixes big and small curators and prefers corpus overlap", () => {
+  const now = new Date("2026-11-27T00:00:00Z");
+  const list = Array.from({ length: 100 }, (_, i) => ({ id: String(i + 1), name: "c" + i, followers: i < 20 ? 100000 - i : 50 + i, lastActive: "2026-10-01T00:00:00.000Z", recent: i === 77 ? [{ appid: 5 }] : [] }));
+  list.push({ id: "999", name: "dead", followers: 5, lastActive: "2020-01-01T00:00:00.000Z", recent: [] });
+  const sel = selectCurators(list, new Set([5]), 20, now);
+  assert.equal(sel.length, 20);
+  assert.ok(sel.some((c) => c.id === "78"), "overlapping curator is chosen");
+  assert.ok(!sel.some((c) => c.id === "999"), "inactive curator is dropped");
+  assert.ok(sel.some((c) => c.followers < 200) && sel.some((c) => c.followers > 90000), "all sizes represented");
+});
+
+test("curatorToCreator builds a contract-shaped curator entry", () => {
+  const now = new Date("2026-11-27T00:00:00Z");
+  const d = parseCuratorDirectory({ results_html: DIRECTORY_HTML }).curators[0];
+  const cr = curatorToCreator(d, parseRecommendations(RECS_HTML, now), parseCuratorPage(CURATOR_PAGE), now);
+  assert.equal(cr.id, "curator:40153535");
+  assert.equal(cr.platform, "steam-curator");
+  assert.equal(cr.followers, 1520);
+  assert.deepEqual(cr.coveredGames.map((g) => g.appid), [1100001, 1100003], "not-recommended reviews are dropped");
+  assert.equal(cr.links[0].label, "Steam Curator");
+  assert.ok(cr.links.some((l) => l.url === "https://www.youtube.com/@dachiplays"));
+  assert.ok(cr.links.some((l) => l.url === "https://steamcommunity.com/groups/Dach1"));
+  assert.equal(curatorToCreator({ ...d, recent: [] }, [], null, now), null);
+  const out = { generatedAt: now.toISOString(), source: "live", creators: [cr], games: cr.coveredGames.map((g) => ({ appid: g.appid, name: g.name, tags: [] })) };
+  assert.deepEqual(validateCreators(out), []);
+});
+
+// ---------- snapshot schema
+test("committed data/creators.json is valid and realistic", () => {
+  const c = readJson("data/creators.json");
+  assert.deepEqual(validateCreators(c, { minCreators: 100 }), []);
+  if (c.source === "sample") {
+    assert.ok(c.creators.length >= 110 && c.creators.length <= 140, `sample size ${c.creators.length}`);
+    const plat = new Set(c.creators.map((x) => x.platform));
+    assert.deepEqual([...plat].sort(), ["steam-curator", "twitch", "youtube"]);
+    const f = c.creators.map((x) => x.followers).sort((a, b) => a - b);
+    assert.ok(f[0] < 1000 && f.at(-1) > 500000, "all sizes");
+    assert.ok(c.games.some((g) => g.comingSoon === true && g.reviews.total === null) && c.games.some((g) => g.reviews.total > 5000), "games carry reviews/comingSoon/releaseDate");
+    assert.ok(c.games.every((g) => g.releaseDate && typeof g.comingSoon === "boolean" && g.reviews));
+    assert.ok(c.creators.some((x) => x.links.length >= 3));
+    assert.ok(c.creators.filter((x) => Date.now() - Date.parse(x.lastActive) < 0).length === 0);
+  }
+  for (const cr of c.creators) assert.ok(Object.keys(cr.tagAffinity).length > 0, `${cr.id} has tagAffinity`);
+});
+
+test("validateCreators rejects emails, bad ids and dangling game references", () => {
+  const c = makeSample();
+  assert.deepEqual(validateCreators(c), []);
+  const bad = structuredClone(c);
+  bad.creators[0].links.push({ label: "Mail", url: "https://x.example/?to=someone@mail.example" });
+  bad.creators[1].id = "nope";
+  bad.creators[2].coveredGames[0].appid = 5;
+  bad.creators[3].tagAffinity = { A: 2 };
+  bad.games[0].comingSoon = "yes";
+  const errs = validateCreators(bad).join("\n");
+  assert.match(errs, /email/);
+  assert.match(errs, /id must look like/);
+  assert.match(errs, /missing from games/);
+  assert.match(errs, /tagAffinity/);
+  assert.match(errs, /comingSoon/);
+});
+
+test("sample generator is deterministic and marked as sample", () => {
+  assert.deepEqual(makeSample(), makeSample());
+  assert.equal(makeSample().source, "sample");
+});
+
+// ---------- build.sh
+function tmpCopyOfApp() {
+  const dir = mkdtempSync(join(tmpdir(), "cm-build-"));
+  const dest = join(dir, "creator-match");
+  cpSync(APP, dest, { recursive: true, filter: (src) => !/[\\/](dist|node_modules)([\\/]|$)/.test(src) });
+  return { dir, dest };
+}
+test("build.sh with SKIP_FETCH produces dist/ with the snapshot and static files, excluding scripts/tests", () => {
+  const { dir, dest } = tmpCopyOfApp();
+  try {
+    execFileSync("bash", ["scripts/build.sh"], { cwd: dest, env: { ...process.env, SKIP_FETCH: "1" }, stdio: "pipe" });
+    assert.equal(readFileSync(join(dest, "dist/data/creators.json"), "utf8"), readFileSync(join(APP, "data/creators.json"), "utf8"));
+    assert.ok(!existsSync(join(dest, "dist/scripts")) && !existsSync(join(dest, "dist/tests")) && !existsSync(join(dest, "dist/src")));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("build.sh keeps the snapshot and exits 0 when the network is unreachable", () => {
+  const { dir, dest } = tmpCopyOfApp();
+  try {
+    const dead = "http://127.0.0.1:9";
+    const env = { ...process.env, STEAM_STORE_BASE: dead, STEAMSPY_BASE: dead, YOUTUBE_BASE: dead, YOUTUBE_API_BASE: dead, HTTP_RETRIES: "0", STEAM_DELAY_MS: "0", STEAMSPY_DELAY_MS: "0", YOUTUBE_DELAY_MS: "0" };
+    delete env.SKIP_FETCH;
+    const out = execFileSync("bash", ["scripts/build.sh"], { cwd: dest, env, stdio: "pipe", timeout: 60000 }).toString();
+    assert.match(out, /copied static files/);
+    assert.equal(readFileSync(join(dest, "dist/data/creators.json"), "utf8"), readFileSync(join(APP, "data/creators.json"), "utf8"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("build.sh REUSE_FETCHED keeps live data already in dist/data and skips the fetch", () => {
+  const { dir, dest } = tmpCopyOfApp();
+  try {
+    execFileSync("bash", ["scripts/build.sh"], { cwd: dest, env: { ...process.env, SKIP_FETCH: "1" }, stdio: "pipe" });
+    const live = { ...readJson("data/creators.json"), source: "live" };
+    writeFileSync(join(dest, "dist/data/creators.json"), JSON.stringify(live));
+    const out = execFileSync("bash", ["scripts/build.sh"], { cwd: dest, env: { ...process.env, REUSE_FETCHED: "1" }, stdio: "pipe" }).toString();
+    assert.match(out, /REUSE_FETCHED/);
+    assert.equal(JSON.parse(readFileSync(join(dest, "dist/data/creators.json"), "utf8")).source, "live");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------- end-to-end against a mock Steam / SteamSpy / YouTube server
+const MONTH = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const fmt = (d) => `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}, ${d.getUTCFullYear()}`;
+const ucId = (n) => "UC" + String(n).padStart(22, "x");
+const GAME_NAMES = { 3000001: "Lantern Thorn", 3000002: "Mossgrave Depths", 3000003: "Quiet Orchard", 3000004: "Hollow Delve", 3000005: "Tidal Gambit", 3000006: "Willow Cottage", 3000007: "Salt Reach", 3000008: "Prism Garden" };
+
+function mockServer() {
+  const hits = [];
+  const daysAgo = (n) => new Date(Date.now() - n * 86400000);
+  const recsFor = (n) => [0, 1, 2, 3].map((k) => 3000001 + ((n + k * 2) % 8));
+  const server = createServer((req, res) => {
+    const u = new URL(req.url, "http://x");
+    hits.push(u.pathname);
+    const json = (b) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(b)); };
+    const text = (b, type = "text/html") => { res.writeHead(200, { "content-type": type }); res.end(b); };
+    let m;
+    if (u.pathname === "/curators/ajaxgetcurators/render/") {
+      const start = Number(u.searchParams.get("start") || 0);
+      const list = Array.from({ length: 50 }, (_, i) => {
+        const n = start + i;
+        return { clanID: String(40000000 + n), name: `Curator ${n}`, link: `https://store.steampowered.com/curator/${40000000 + n}-C/`, strAvatarHash: "", total_followers: Math.max(20, 90000 - n * 300), total_reviews: 50, last_curation_date: Math.floor((Date.now() - (n % 30) * 86400000) / 1000), curator_description: "", m_rgAppRecommendations: recsFor(n).map((a) => ({ appid: a, recommendation_state: 0, time_recommended: Math.floor(Date.now() / 1000) - 86400 * 5, blurb: "ok" })) };
+      });
+      return json({ success: 1, total_count: 300, start, pagesize: 50, results_html: `<script>var g_rgTopCurators = ${JSON.stringify(list)};\n</script>` });
+    }
+    if ((m = u.pathname.match(/^\/curator\/(\d+)\/ajaxgetfilteredrecommendations\/$/))) {
+      const n = Number(m[1]) - 40000000;
+      const html = recsFor(n).map((a, k) => `<div class="recommendation" ><a data-ds-appid="${a}"><img alt="${GAME_NAMES[a]}"></a><div class="recommendation_stats"><span class='color_recommended'>Recommended</span> <span class="curator_review_date">${fmt(daysAgo(3 + k * 20))}</span></div><div class="recommendation_desc">Nice game ${k}</div></div>`).join("");
+      return json({ success: 1, total_count: 4, results_html: html });
+    }
+    if ((m = u.pathname.match(/^\/curator\/(\d+)\/$/))) {
+      const n = Number(m[1]) - 40000000;
+      const yt = n % 3 === 0 ? `<a href="https://steamcommunity.com/linkfilter/?u=https%3A%2F%2Fwww.youtube.com%2F%40handle${n}"><img alt="YouTube: h"></a>` : "";
+      return text(`<h2 class="pageheader curator_name"><a href="x">Curator ${n}</a></h2><div class="socialmedia_accounts">${yt}<a href="mailto:a@b.example">m</a></div><div class="num_followers" id="CuratorNumFollowers_${m[1]}">${Math.max(20, 90000 - n * 300)}</div>`);
+    }
+    if ((m = u.pathname.match(/^\/@handle(\d+)$/))) return text(`<link rel="canonical" href="https://www.youtube.com/channel/${ucId(Number(m[1]))}">`);
+    if (u.pathname === "/feeds/videos.xml") {
+      const id = u.searchParams.get("channel_id");
+      const n = Number(id.replace(/^UCx+/, ""));
+      const entries = [0, 1, 2, 3].map((k) => `<entry><yt:videoId>v${n}k${k}</yt:videoId><title>${GAME_NAMES[3000001 + ((n + k) % 8)]} - review</title><published>${daysAgo(2 + k * 9).toISOString()}</published><media:group><media:community><media:statistics views="${1000 + k * 100}"/></media:community></media:group></entry>`).join("");
+      return text(`<feed xmlns:yt="y" xmlns:media="m"><yt:channelId>${id}</yt:channelId><title>Channel ${n}</title>${entries}</feed>`, "application/atom+xml");
+    }
+    if (u.pathname === "/api.php") {
+      if (u.searchParams.get("request") === "appdetails") { const id = Number(u.searchParams.get("appid")); return json({ appid: id, name: GAME_NAMES[id] || `Spy ${id}`, positive: 90, negative: 10, tags: { Indie: 10, Roguelike: 50, Cozy: 5 } }); }
+      return json({});
+    }
+    if (u.pathname === "/youtube/v3/search") {
+      const q = u.searchParams.get("q");
+      const name = q.replace(/^"|" game$/g, "").replace(/"/g, "");
+      return json({ items: [0, 1].map((k) => ({ id: { videoId: `api${k}${name.length}` }, snippet: { channelId: ucId(900 + k), channelTitle: `Api Channel ${k}`, title: `${name} gameplay`, publishedAt: daysAgo(5).toISOString() } })) });
+    }
+    if (u.pathname === "/youtube/v3/videos") return json({ items: u.searchParams.get("id").split(",").map((id) => ({ id, statistics: { viewCount: "4321" } })) });
+    if (u.pathname === "/youtube/v3/channels") return json({ items: u.searchParams.get("id").split(",").map((id) => ({ id, snippet: { title: `Api ${id.slice(-3)}`, thumbnails: { default: { url: "https://yt3.example/a.jpg" } } }, statistics: { subscriberCount: "777" } })) });
+    res.writeHead(404); res.end("nope");
+  });
+  return { server, hits };
+}
+
+async function runFetch(env, args) {
+  return new Promise((resolve, reject) => {
+    let buf = "";
+    const p = spawn(process.execPath, [join(APP, "scripts/fetch-creators.mjs"), ...args], { env });
+    p.stdout.on("data", (d) => (buf += d)); p.stderr.on("data", (d) => (buf += d));
+    p.on("close", (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}\n${buf}`))));
+  });
+}
+
+test("fetch-creators.mjs end to end against a mock server (curators, youtube links + RSS, spy tags, optional API key)", async (t) => {
+  const { server } = mockServer();
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "cm-fetch-"));
+  try {
+    const corpusFile = join(dir, "corpus.json");
+    writeFileSync(corpusFile, JSON.stringify({ generatedAt: new Date().toISOString(), source: "live", tagIndex: {}, games: Object.entries(GAME_NAMES).slice(0, 5).map(([id, name], i) => ({ appid: Number(id), name, tags: [{ name: "Roguelike", votes: 9 }, { name: "Indie", votes: 5 }], reviews: { total: i === 0 ? null : 1000 * i }, comingSoon: i === 0, releaseDate: i === 0 ? "Q2 2027" : "2025-05-05", followers: 10 })) }));
+    const baseEnv = { ...process.env, STEAM_STORE_BASE: base, STEAMSPY_BASE: base, YOUTUBE_BASE: base, YOUTUBE_API_BASE: base, STEAM_DELAY_MS: "0", STEAMSPY_DELAY_MS: "0", YOUTUBE_DELAY_MS: "0", HTTP_RETRIES: "0" };
+    delete baseEnv.YOUTUBE_API_KEY;
+    // keyless
+    const out1 = join(dir, "out1");
+    const log1 = await runFetch(baseEnv, ["--out", out1, "--corpus", corpusFile, "--max-curators", "40", "--directory-pages", "3", "--min-output", "10", "--max-yt-channels", "30"]);
+    t.diagnostic(log1.split("\n").slice(-14).join("\n"));
+    const r1 = JSON.parse(readFileSync(join(out1, "creators.json"), "utf8"));
+    assert.deepEqual(validateCreators(r1, { minCreators: 10 }), []);
+    assert.equal(r1.source, "live");
+    const cur = r1.creators.filter((c) => c.platform === "steam-curator");
+    const yt = r1.creators.filter((c) => c.platform === "youtube");
+    assert.ok(cur.length >= 20, `curators ${cur.length}`);
+    assert.ok(yt.length >= 5, `youtube ${yt.length}`);
+    assert.ok(cur.some((c) => c.links.some((l) => l.url.startsWith("https://www.youtube.com/@handle"))), "curator links kept");
+    assert.ok(yt.every((c) => c.followers === null && c.avgViews > 0 && c.uploadsPerMonth > 0 && c.coveredGames.length >= 1));
+    assert.ok(cur.every((c) => Object.keys(c.tagAffinity).length > 0), "every creator gets a tagAffinity (spy tags for non-corpus games)");
+    assert.ok(r1.games.every((g) => g.tags.length > 0));
+    const g1 = r1.games.find((g) => g.appid === 3000001);
+    assert.equal(g1.comingSoon, true);
+    assert.equal(g1.reviews.total, null);
+    assert.equal(g1.releaseDate, "Q2 2027");
+    assert.ok(!JSON.stringify(r1).includes("@b.example"), "no emails");
+    // with an API key: extra channels with subscriber counts
+    const out2 = join(dir, "out2");
+    await runFetch({ ...baseEnv, YOUTUBE_API_KEY: "test-key" }, ["--out", out2, "--corpus", corpusFile, "--max-curators", "20", "--directory-pages", "2", "--min-output", "10", "--yt-games", "4"]);
+    const r2 = JSON.parse(readFileSync(join(out2, "creators.json"), "utf8"));
+    assert.deepEqual(validateCreators(r2, { minCreators: 10 }), []);
+    const api = r2.creators.filter((c) => c.platform === "youtube" && c.followers === 777);
+    assert.ok(api.length >= 1, "API channels carry subscriber counts");
+    assert.ok(api[0].coveredGames.length >= 1 && api[0].coveredGames[0].appid != null);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fetch-creators.mjs fails cleanly (exit 1, no output) when nothing is reachable", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cm-fail-"));
+  try {
+    const dead = "http://127.0.0.1:9";
+    let code = 0;
+    try {
+      execFileSync(process.execPath, [join(APP, "scripts/fetch-creators.mjs"), "--out", join(dir, "o")], { env: { ...process.env, STEAM_STORE_BASE: dead, STEAMSPY_BASE: dead, YOUTUBE_BASE: dead, YOUTUBE_API_BASE: dead, HTTP_RETRIES: "0", STEAM_DELAY_MS: "0", STEAMSPY_DELAY_MS: "0", YOUTUBE_DELAY_MS: "0" }, stdio: "pipe", timeout: 60000 });
+    } catch (e) { code = e.status; }
+    assert.equal(code, 1);
+    assert.ok(!existsSync(join(dir, "o/creators.json")));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
