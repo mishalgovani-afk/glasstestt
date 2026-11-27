@@ -378,3 +378,10 @@ function pickEvenlyList(list, n) {
   if (list.length <= n) return list.slice();
   return Array.from({ length: n }, (_, i) => list[Math.floor((i * list.length) / n)]);
 }
+
+/** Store page HTML -> user tag names ordered by votes, from the `InitAppTagModal(appid, [ {tagid,name,count} ], ...)` call. */
+export function parseStorePageTags(html) {
+  const arr = extractJsonArrayAfter(String(html ?? ""), "InitAppTagModal");
+  if (!Array.isArray(arr)) return [];
+  return arr.filter((t) => t && typeof t.name === "string" && t.name).sort((a, b) => (Number(b.count) || 0) - (Number(a.count) || 0)).map((t) => decodeEntities(t.name));
+}

@@ -280,6 +280,7 @@ test("build.sh REUSE_FETCHED keeps live data already in dist/data and skips the 
 const MONTH = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const fmt = (d) => `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}, ${d.getUTCFullYear()}`;
 const ucId = (n) => "UC" + String(n).padStart(22, "x");
+const WATCH = [2876290, 3154150];
 const GAME_NAMES = { 3000001: "Lantern Thorn", 3000002: "Mossgrave Depths", 3000003: "Quiet Orchard", 3000004: "Hollow Delve", 3000005: "Tidal Gambit", 3000006: "Willow Cottage", 3000007: "Salt Reach", 3000008: "Prism Garden" };
 
 function mockServer() {
@@ -317,6 +318,11 @@ function mockServer() {
       const entries = [0, 1, 2, 3].map((k) => `<entry><yt:videoId>v${n}k${k}</yt:videoId><title>${GAME_NAMES[3000001 + ((n + k) % 8)]} - review</title><published>${daysAgo(2 + k * 9).toISOString()}</published><media:group><media:community><media:statistics views="${1000 + k * 100}"/></media:community></media:group></entry>`).join("");
       return text(`<feed xmlns:yt="y" xmlns:media="m"><yt:channelId>${id}</yt:channelId><title>Channel ${n}</title>${entries}</feed>`, "application/atom+xml");
     }
+    if (u.pathname === "/api/appdetails") {
+      const id = Number(u.searchParams.get("appids"));
+      const names = { 2876290: "Sojourn Past", 3154150: "SpookABoo" };
+      return json({ [id]: { success: true, data: { name: names[id] || GAME_NAMES[id] || `Watch ${id}`, release_date: { coming_soon: false, date: "5 Jun, 2025" }, recommendations: { total: 50 } } } });
+    }
     if (u.pathname === "/api.php") {
       if (u.searchParams.get("request") === "appdetails") { const id = Number(u.searchParams.get("appid")); return json({ appid: id, name: GAME_NAMES[id] || `Spy ${id}`, positive: 90, negative: 10, tags: { Indie: 10, Roguelike: 50, Cozy: 5 } }); }
       return json({});
@@ -349,13 +355,15 @@ test("fetch-creators.mjs end to end against a mock server (curators, youtube lin
   const dir = mkdtempSync(join(tmpdir(), "cm-fetch-"));
   try {
     const corpusFile = join(dir, "corpus.json");
-    writeFileSync(corpusFile, JSON.stringify({ generatedAt: new Date().toISOString(), source: "live", tagIndex: {}, games: Object.entries(GAME_NAMES).slice(0, 5).map(([id, name], i) => ({ appid: Number(id), name, tags: [{ name: "Roguelike", votes: 9 }, { name: "Indie", votes: 5 }], reviews: { total: i === 0 ? null : 1000 * i }, comingSoon: i === 0, releaseDate: i === 0 ? "Q2 2027" : "2025-05-05", followers: 10 })) }));
+    const watchFile = join(dir, "watchlist.json");
+    writeFileSync(watchFile, JSON.stringify({ appids: WATCH }));
+    writeFileSync(corpusFile, JSON.stringify({ generatedAt: new Date().toISOString(), source: "live", tagIndex: {}, games: [...Object.entries(GAME_NAMES), [3999999, "Uncovered Gem"], [2876290, "Sojourn Past"]].slice(0, 5).concat([[3999999, "Uncovered Gem"], [2876290, "Sojourn Past"]]).map(([id, name], i) => ({ appid: Number(id), name, tags: [{ name: "Roguelike", votes: 9 }, { name: "Indie", votes: 5 }], reviews: { total: i === 0 ? null : 1000 * i }, comingSoon: i === 0, releaseDate: i === 0 ? "Q2 2027" : "2025-05-05", followers: 10 })) }));
     const baseEnv = { ...process.env, STEAM_STORE_BASE: base, STEAMSPY_BASE: base, YOUTUBE_BASE: base, YOUTUBE_API_BASE: base, STEAM_DELAY_MS: "0", STEAMSPY_DELAY_MS: "0", YOUTUBE_DELAY_MS: "0", HTTP_RETRIES: "0" };
     delete baseEnv.YOUTUBE_API_KEY;
     baseEnv.CM_DEADLINE_MIN = "7";
     // keyless
     const out1 = join(dir, "out1");
-    const log1 = await runFetch(baseEnv, ["--out", out1, "--corpus", corpusFile, "--max-curators", "40", "--directory-pages", "3", "--min-output", "10", "--max-yt-channels", "30"]);
+    const log1 = await runFetch(baseEnv, ["--out", out1, "--corpus", corpusFile, "--max-curators", "40", "--directory-pages", "3", "--min-output", "10", "--max-yt-channels", "30", "--watchlist", watchFile]);
     t.diagnostic(log1.split("\n").slice(-14).join("\n"));
     assert.match(log1, /deadline=7min/, "CM_DEADLINE_MIN is honoured");
     assert.match(log1, /steamspy: finished/);
@@ -375,14 +383,29 @@ test("fetch-creators.mjs end to end against a mock server (curators, youtube lin
     assert.equal(g1.reviews.total, null);
     assert.equal(g1.releaseDate, "Q2 2027");
     assert.ok(!JSON.stringify(r1).includes("@b.example"), "no emails");
+    // every corpus game and every watchlist game is in games[], even with zero coverage
+    const covered = new Set(r1.creators.flatMap((c) => c.coveredGames.map((g) => g.appid)));
+    const unc = r1.games.find((g) => g.appid === 3999999);
+    assert.ok(unc && unc.name === "Uncovered Gem" && !covered.has(3999999), "uncovered corpus game is listed");
+    const sojourn = r1.games.find((g) => g.appid === 2876290);
+    assert.ok(sojourn && sojourn.name === "Sojourn Past" && sojourn.tags.length > 0, "watchlist game in corpus is listed with tags");
+    const spook = r1.games.find((g) => g.appid === 3154150);
+    assert.ok(spook && spook.name === "SpookABoo" && spook.tags.length > 0 && spook.releaseDate === "2025-06-05" && spook.comingSoon === false, "watchlist game outside the corpus is fetched directly");
+    assert.ok(!covered.has(3154150));
     // with an API key: extra channels with subscriber counts
     const out2 = join(dir, "out2");
-    await runFetch({ ...baseEnv, YOUTUBE_API_KEY: "test-key" }, ["--out", out2, "--corpus", corpusFile, "--max-curators", "20", "--directory-pages", "2", "--min-output", "10", "--yt-games", "4"]);
+    await runFetch({ ...baseEnv, YOUTUBE_API_KEY: "test-key" }, ["--out", out2, "--corpus", corpusFile, "--max-curators", "20", "--directory-pages", "2", "--min-output", "10", "--yt-games", "4", "--watchlist", watchFile]);
     const r2 = JSON.parse(readFileSync(join(out2, "creators.json"), "utf8"));
     assert.deepEqual(validateCreators(r2, { minCreators: 10 }), []);
     const api = r2.creators.filter((c) => c.platform === "youtube" && c.followers === 777);
     assert.ok(api.length >= 1, "API channels carry subscriber counts");
     assert.ok(api[0].coveredGames.length >= 1 && api[0].coveredGames[0].appid != null);
+    // no corpus at all: watchlist games are still fetched directly and listed
+    const out3 = join(dir, "out3");
+    await runFetch({ ...baseEnv }, ["--out", out3, "--corpus", join(dir, "missing-corpus.json"), "--max-curators", "10", "--directory-pages", "1", "--min-output", "3", "--no-youtube", "--watchlist", watchFile]);
+    const r3 = JSON.parse(readFileSync(join(out3, "creators.json"), "utf8"));
+    assert.deepEqual(validateCreators(r3, { minCreators: 3 }), []);
+    assert.ok(r3.games.some((g) => g.appid === 2876290 && g.name === "Sojourn Past" && g.tags.length > 0) && r3.games.some((g) => g.appid === 3154150 && g.tags.length > 0), "watchlist games listed even when the corpus does not exist");
   } finally {
     server.close();
     rmSync(dir, { recursive: true, force: true });

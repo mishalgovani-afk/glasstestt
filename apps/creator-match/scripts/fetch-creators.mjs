@@ -28,7 +28,7 @@ import { parseArgs, numEnv, sleep, Throttle, getJson, getText, writeJsonAtomic, 
 import {
   parseCuratorDirectory, parseRecommendations, parseCuratorPage, linksFromText, parseYouTubeUrl, parseChannelIdFromHtml,
   parseYouTubeFeed, uploadsPerMonth, averageViews, parseYtSearch, parseYtChannels, parseYtVideos, buildGameIndex,
-  matchGamesInTitle, buildTagAffinity, selectCurators, normTitle,
+  matchGamesInTitle, buildTagAffinity, selectCurators, normTitle, parseStorePageTags, parseCuratorDate,
 } from "./parsers.mjs";
 import { validateCreators } from "./validate.mjs";
 
@@ -53,6 +53,7 @@ export async function main(argv = process.argv.slice(2)) {
     maxSpy: Number(a["max-spy"] ?? numEnv("CM_MAX_SPY", 2000)),
     minOutput: Number(a["min-output"] ?? 20),
     noYoutube: !!a["no-youtube"],
+    watchlist: a.watchlist || resolve(HERE, "../../page-doctor/watchlist.json"),
   };
   const t0 = Date.now();
   const budget = opts.deadlineMin * 60000;
@@ -72,6 +73,22 @@ export async function main(argv = process.argv.slice(2)) {
   const { games: baseGames, origin } = await loadGames(opts, store, spyT);
   log(`games: ${baseGames.size} from ${origin}`);
   const gameInfo = new Map(baseGames); // appid -> {appid,name,tags[],reviewsTotal,comingSoon,releaseDate}
+
+  // Watchlist games (Page Doctor's watchlist.json) must always be searchable, even if no creator covered them and even
+  // without a corpus: take them from the corpus when present, else fetch name + tags directly.
+  const watchIds = [];
+  try {
+    for (const id of JSON.parse(readFileSync(opts.watchlist, "utf8")).appids || []) if (Number.isFinite(Number(id)) && Number(id) > 0) watchIds.push(Number(id));
+  } catch (e) { warn(`no readable watchlist at ${opts.watchlist} (${e.message})`); }
+  let watchFetched = 0;
+  for (const id of watchIds) {
+    if (gameInfo.get(id)?.tags?.length) continue;
+    try {
+      const g = await fetchWatchGame(id, store, spyT, gameInfo.get(id));
+      if (g) { gameInfo.set(id, g); watchFetched++; }
+    } catch (e) { warn(`watchlist game ${id}: ${e.message}`); }
+  }
+  log(`watchlist: ${watchIds.length} appids, ${watchIds.filter((id) => gameInfo.has(id)).length} known (${watchFetched} fetched directly)`);
 
   // ---- 2. curators directory
   const directory = new Map();
@@ -220,14 +237,19 @@ export async function main(argv = process.argv.slice(2)) {
     out.push(cr);
   }
   out.sort((x, y) => (y.followers ?? 0) - (x.followers ?? 0) || (Date.parse(y.lastActive || "") || 0) - (Date.parse(x.lastActive || "") || 0));
-  const gamesOut = [...referenced].map((id) => {
+  // games[]: every game covered by a creator, plus every game we know about (the whole Page Doctor corpus, the watchlist),
+  // so the "a game on Steam" search finds them even when nobody covered them yet.
+  const allIds = new Set([...referenced, ...gameInfo.keys(), ...watchIds]);
+  const gamesOut = [...allIds].filter((id) => gameInfo.has(id)).map((id) => {
     const g = gameInfo.get(id);
     const o = { appid: id, name: g?.name || `App ${id}`, tags: g?.tags || [] };
     if (g?.reviewsTotal !== undefined) o.reviews = { total: g.reviewsTotal };
     if (g?.comingSoon !== undefined) o.comingSoon = g.comingSoon;
     if (g?.releaseDate) o.releaseDate = g.releaseDate;
     return o;
-  });
+  }).filter((g) => referenced.has(g.appid) || !/^App \d+$/.test(g.name));
+  const watchMissing = watchIds.filter((id) => !gamesOut.some((g) => g.appid === id));
+  if (watchMissing.length) warn(`watchlist games not available (no name found): ${watchMissing.join(", ")}`);
   const result = {
     generatedAt: new Date().toISOString(), source: "live", creators: out, games: gamesOut,
     meta: { gamesFrom: origin, curatorsInDirectory: directory.size, curatorsCrawled: crawled, youtubeApi: !!apiKey, elapsedSec: Math.round((Date.now() - t0) / 1000) },
@@ -237,7 +259,7 @@ export async function main(argv = process.argv.slice(2)) {
   const byPlat = {};
   for (const c of out) byPlat[c.platform] = (byPlat[c.platform] || 0) + 1;
   log("---- summary ----");
-  log(`creators: ${out.length} ${JSON.stringify(byPlat)}; games referenced: ${gamesOut.length} (with tags: ${gamesOut.filter((g) => g.tags.length).length}, SteamSpy lookups ${spyOk}/${spyTried.size})`);
+  log(`creators: ${out.length} ${JSON.stringify(byPlat)}; games referenced: ${gamesOut.length} (with tags: ${gamesOut.filter((g) => g.tags.length).length}, of which uncovered ${gamesOut.filter((g) => !referenced.has(g.appid)).length}, SteamSpy lookups ${spyOk}/${spyTried.size})`);
   log(`followers known for ${out.filter((c) => c.followers != null).length}; with other links: ${out.filter((c) => c.links.length > 1).length}; active in last 90 days: ${out.filter((c) => c.lastActive && now - Date.parse(c.lastActive) < 90 * DAY).length}`);
   log(store.summary()); log(spyT.summary()); log(ytT.summary()); if (apiKey) log(apiT.summary());
   const errs = validateCreators(result, { minCreators: opts.minOutput });
@@ -369,6 +391,38 @@ async function youtubeApiSearch(opts, key, apiT, games, channels, now, before) {
     } catch (e) { warn("channels.list: " + e.message); }
   }
   log(`youtube api: ${channels.size} channels from ${picks.length} searches`);
+}
+
+/** Name, release info and tags for one game straight from Steam (appdetails) + SteamSpy, with the store-page tag modal as fallback. */
+async function fetchWatchGame(id, store, spyT, existing) {
+  const g = { appid: id, name: existing?.name || "", tags: existing?.tags || [] };
+  try {
+    const json = await getJson(`${storeBase()}/api/appdetails?appids=${id}&cc=us&l=en`, store, { treat403AsLimit: true });
+    const d = json?.[String(id)]?.data;
+    if (d?.name) g.name = String(d.name).replace(/&amp;/g, "&");
+    if (d?.release_date) {
+      g.comingSoon = !!d.release_date.coming_soon;
+      const iso = parseCuratorDate(d.release_date.date);
+      if (iso) g.releaseDate = iso.slice(0, 10); else if (d.release_date.date) g.releaseDate = String(d.release_date.date);
+    }
+    if (Number.isFinite(d?.recommendations?.total)) g.reviewsTotal = d.recommendations.total;
+    else if (g.comingSoon) g.reviewsTotal = null;
+  } catch (e) { warn(`appdetails ${id}: ${e.message}`); }
+  if (!g.tags.length) {
+    try {
+      const sp = await getJson(`${spyBase()}/api.php?request=appdetails&appid=${id}`, spyT);
+      if (!g.name && sp?.name) g.name = String(sp.name);
+      if (sp?.tags && !Array.isArray(sp.tags)) g.tags = Object.entries(sp.tags).sort((x, y) => y[1] - x[1]).map(([n]) => n).slice(0, 12);
+      if (g.reviewsTotal === undefined && Number.isFinite(Number(sp?.positive)) && Number.isFinite(Number(sp?.negative))) g.reviewsTotal = Number(sp.positive) + Number(sp.negative);
+    } catch (e) { warn(`steamspy ${id}: ${e.message}`); }
+  }
+  if (!g.tags.length) {
+    try {
+      const { text } = await getText(`${storeBase()}/app/${id}/?l=english&cc=us`, store, { headers: { Cookie: "birthtime=568022401; lastagecheckage=1-0-1988; wants_mature_content=1" } });
+      g.tags = parseStorePageTags(text).slice(0, 12);
+    } catch (e) { warn(`store page tags ${id}: ${e.message}`); }
+  }
+  return g.name ? g : null;
 }
 
 async function loadGames(opts, store, spyT) {
