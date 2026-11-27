@@ -291,3 +291,17 @@ details > summary:focus-visible { outline: 3px solid var(--accent); outline-offs
 .hyg-item input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); }
 .hyg-item .hyg-t { font-size: var(--fs-4); font-weight: 600; color: var(--text); margin: 0 0 2px; cursor: pointer; }
 .hyg-item p { margin: 0 0 4px; font-size: var(--fs-3); overflow-wrap: anywhere; }
+
+.hyg-area h3 { margin: 14px 0 0; font-size: var(--fs-2); text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.hyg-area:first-child h3 { margin-top: 0; }
+.hyg-item .fix b { color: var(--accent); }
+.badge.sev { margin-left: 8px; font-size: var(--fs-1); vertical-align: middle; }
+.badge.sev-high { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); }
+.badge.sev-medium { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); background: color-mix(in srgb, var(--warn) 14%, var(--surface)); }
+.area-break { margin: 0 0 14px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius-sm); }
+.area-break h3 { margin-bottom: 8px; }
+.ab-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 24px; }
+.ab { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); align-items: center; gap: 8px; font-size: var(--fs-2); }
+.ab .ab-w { display: none; }
+.ab .meter .track { background: var(--grid); height: 6px; }
+.ab .meter .val { font-size: var(--fs-2); }

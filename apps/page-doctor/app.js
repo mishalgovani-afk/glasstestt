@@ -125,7 +125,7 @@ function renderDataStatus(data, lineEl, bannerEl, countText) {
 const KEY_STORE = 'page-doctor:anthropic-key';
 const AREAS = [
   ['capsule', 'Capsule and first impression'], ['description', 'Description'], ['tags', 'Tags'], ['media', 'Screenshots and trailer'],
-  ['price', 'Price'], ['languages', 'Languages'], ['social-proof', 'Social proof'], ['timing', 'Release timing'],
+  ['price', 'Price'], ['languages', 'Languages'], ['social-proof', 'Social proof'], ['timing', 'Release timing'], ['technical', 'Technical setup'],
 ];
 const STATUS_LABEL = { pass: 'Pass', warn: 'Warn', fail: 'Fail' };
 const STATUS_RANK = { fail: 0, warn: 1, pass: 2 };
@@ -179,9 +179,14 @@ function searchGames(q, limit = 8) {
   }
   return scored.sort((a, b) => a.s - b.s || String(a.g.name).localeCompare(String(b.g.name))).slice(0, limit).map((x) => x.g);
 }
+/** releaseDate may be an ISO date or free text such as "Q2 2027": show both sensibly. */
+function fmtRelease(v) {
+  const t = String(v == null ? '' : v).trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(t) ? (fmtDate(t) || t) : t;
+}
 function gameMeta(g) {
   const bits = [];
-  if (g.releaseDate) bits.push(g.releaseDate);
+  if (g.releaseDate) bits.push(fmtRelease(g.releaseDate));
   if (g.reviews && g.reviews.positivePct != null) bits.push(`${g.reviews.positivePct}% positive`);
   if (g.developers && g.developers[0]) bits.push(g.developers[0]);
   return bits.join(' · ');
@@ -307,11 +312,11 @@ $('#manualForm').addEventListener('submit', (e) => {
     appid: null, manual: true, name: $('#mName').value.trim() || 'Your game', url: null,
     shortDescription: desc, aboutText: $('#mAbout').value.trim(),
     tags: manualTags.map((name, i) => ({ name, votes: Math.max(1, 1000 - i * 40) })), genres: [],
-    priceUSD: price, isFree: price === 0, releaseDate: '', comingSoon: $('#mUnreleased').checked,
+    priceUSD: price, isFree: price === 0, releaseDate: $('#mRelease').value.trim(), comingSoon: $('#mUnreleased').checked,
     developers: [], publishers: [], headerImage: null, capsuleImage: null,
     screenshots: Array.from({ length: shots }, () => ''), movies: $('#mTrailer').checked ? 1 : 0, hasTrailer: $('#mTrailer').checked,
     languages: [...manualLangs], fullAudioLanguages: [],
-    reviews: { total: null, positivePct: null, scoreDesc: null }, followers: wish, ownersRange: null, ccu: null, hasDemo: null, earlyAccess: false,
+    reviews: { total: null, positivePct: null, scoreDesc: null }, followers: null, wishlists: wish, ownersRange: null, ccu: null, hasDemo: null, earlyAccess: false,
   };
   try { history.replaceState(null, '', location.pathname + location.search); } catch { /* ignore */ }
   els.notFound.hidden = true;
@@ -323,7 +328,7 @@ function runAudit(game, manual, { scroll = true } = {}) {
   let comps; let diag;
   try {
     comps = findComparables(game, corpus, { limit: 20 }) || [];
-    diag = diagnose(game, comps);
+    diag = diagnose(game, comps, { now: new Date() });
   } catch (err) {
     clear(els.results).append(h('div', { class: 'banner error', role: 'alert' }, h('span', { class: 'ico', 'aria-hidden': 'true', text: '!' }), h('div', null, h('strong', { text: 'The audit failed. ' }), String(err && err.message || err))));
     return;
@@ -371,11 +376,12 @@ function renderReport() {
   const meta = h('ul', { class: 'rh-meta' },
     manual ? h('li', { text: 'Pasted page details' }) : null,
     game.developers && game.developers.length ? h('li', { text: game.developers.join(', ') }) : null,
-    game.releaseDate ? h('li', { text: game.comingSoon ? `Releases ${game.releaseDate}` : `Released ${game.releaseDate}` }) : (game.comingSoon ? h('li', { text: 'Not released yet' }) : null),
+    game.releaseDate ? h('li', { text: game.comingSoon ? `Releases ${fmtRelease(game.releaseDate)}` : `Released ${fmtRelease(game.releaseDate)}` }) : (game.comingSoon ? h('li', { text: 'Not released yet' }) : null),
     h('li', { text: price$(game) }),
     game.reviews && game.reviews.total != null ? h('li', { text: `${fmtInt(game.reviews.total)} reviews${game.reviews.positivePct != null ? ` (${game.reviews.positivePct}% positive)` : ''}` }) : null,
-    prelaunch && game.followers != null ? h('li', { text: `${fmtInt(game.followers)} ${manual ? 'wishlists' : 'followers'}` }) : null,
-    prelaunch && game.followers == null && !(game.reviews && game.reviews.total != null) ? h('li', { text: 'Pre-launch: no reviews yet' }) : null);
+    prelaunch && manual && game.wishlists != null ? h('li', { text: `${fmtInt(game.wishlists)} wishlists` }) : null,
+    prelaunch && !manual && game.followers != null ? h('li', { text: `${fmtInt(game.followers)} followers` }) : null,
+    prelaunch && !(game.reviews && game.reviews.total != null) ? h('li', { text: 'Pre-launch: no reviews yet' }) : null);
   const priorities = checks.filter((c) => c.status !== 'pass').sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]).slice(0, 3);
   const head = h('section', { class: 'card', 'aria-label': 'Summary' },
     h('div', { class: 'report-head' },
@@ -424,8 +430,9 @@ function renderChecks(checks, counts, diag) {
     if (!body.firstChild) body.append(h('p', { class: 'fine', text: 'Nothing to show. All checks pass.' }));
   };
   onlyProblems.addEventListener('change', draw);
+  const ab = areaBreakdown(diag);
   card.append(h('div', { class: 'card-head' }, h('h2', { id: 'checksTitle', text: 'Checklist' }),
-    h('div', { class: 'filter-row' }, h('label', { class: 'check', for: 'onlyProblems' }, onlyProblems, `Only show problems (${counts.fail + counts.warn})`))), body);
+    h('div', { class: 'filter-row' }, h('label', { class: 'check', for: 'onlyProblems' }, onlyProblems, `Only show problems (${counts.fail + counts.warn})`))), ab, body);
   draw();
   return card;
 }
@@ -550,7 +557,7 @@ function renderRewrite(game, diag) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 2000, system: req.system, messages: [{ role: 'user', content: req.user }] }),
+        body: JSON.stringify({ model: req.model || 'claude-sonnet-5-5', max_tokens: req.max_tokens || 4000, system: req.system, messages: [{ role: 'user', content: req.user }] }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status}`);
@@ -597,6 +604,11 @@ function exportMarkdown() {
     L.push('');
   }
   const ts = diag.tagSuggestions || {};
+  if (Array.isArray(diag.manualChecklist) && diag.manualChecklist.length) {
+    L.push('## Steam hygiene checklist (check by hand)', '');
+    for (const i of diag.manualChecklist) L.push(`- [ ] **${i.title}**${i.severity ? ` (${i.severity})` : ''}${i.detail ? `: ${i.detail}` : ''}${i.fix ? ` Fix: ${i.fix}` : ''}${safeUrl(i.sourceUrl) ? ` ${i.sourceUrl}` : ''}`);
+    L.push('');
+  }
   L.push('## Tags', '', `Current: ${(game.tags || []).map((t) => t.name).join(', ') || 'none'}`, '');
   if ((ts.add || []).length) { L.push('Add:'); ts.add.forEach((s) => L.push(`- ${s.tag}: ${s.why || ''}`)); L.push(''); }
   if ((ts.remove || []).length) { L.push('Remove:'); ts.remove.forEach((s) => L.push(`- ${s.tag}: ${s.why || ''}`)); L.push(''); }
@@ -615,25 +627,51 @@ function hygieneKey(game) {
   const id = game.appid != null ? String(game.appid) : `manual-${String(game.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`;
   return `page-doctor:ticks:${id}`;
 }
+const SEV_RANK = { high: 0, medium: 1, low: 2 };
+const SEV_LABEL = { high: 'High priority', medium: 'Medium', low: 'Low' };
 function renderHygiene(game, diag) {
-  const items = Array.isArray(diag.manualChecklist) ? diag.manualChecklist.filter((i) => i && i.id && i.title) : [];
+  const areaOrder = (a) => { const i = AREAS.findIndex(([id]) => id === a); return i < 0 ? 99 : i; };
+  const items = (Array.isArray(diag.manualChecklist) ? diag.manualChecklist.filter((i) => i && i.id && i.title) : [])
+    .sort((x, y) => areaOrder(x.area) - areaOrder(y.area) || (SEV_RANK[x.severity] ?? 3) - (SEV_RANK[y.severity] ?? 3));
   if (!items.length) return h('div');
   const key = hygieneKey(game);
-  let done = new Set((store.getJson(key, []) || []).filter((x) => typeof x === 'string'));
+  const done = new Set((store.getJson(key, []) || []).filter((x) => typeof x === 'string'));
   const progress = h('span', { class: 'fine', 'aria-live': 'polite' });
   const upd = () => { progress.textContent = `${items.filter((i) => done.has(i.id)).length} of ${items.length} done`; };
   const areaLabel = (a) => (AREAS.find(([id]) => id === a) || [a, humanize(a || '')])[1];
-  const list = h('ul', { class: 'hyg' }, items.map((i) => {
+  const list = h('ul', { class: 'hyg' });
+  let lastArea = null;
+  for (const i of items) {
+    if (i.area !== lastArea) { lastArea = i.area; list.append(h('li', { class: 'hyg-area' }, h('h3', { text: areaLabel(i.area) }))); }
     const cb = h('input', { type: 'checkbox', id: `hyg-${i.id}` });
     cb.checked = done.has(i.id);
     cb.addEventListener('change', () => { if (cb.checked) done.add(i.id); else done.delete(i.id); store.setJson(key, [...done]); upd(); });
-    return h('li', { class: 'hyg-item' }, cb,
-      h('div', null, h('label', { for: `hyg-${i.id}`, class: 'hyg-t' }, i.title, i.area ? h('span', { class: 'badge plain manual-tag', text: areaLabel(i.area) }) : null),
+    list.append(h('li', { class: 'hyg-item' }, cb,
+      h('div', null,
+        h('label', { for: `hyg-${i.id}`, class: 'hyg-t' }, i.title, i.severity ? h('span', { class: `badge plain sev sev-${i.severity}`, text: SEV_LABEL[i.severity] || humanize(i.severity) }) : null),
         i.detail ? h('p', { text: i.detail }) : null,
-        safeUrl(i.sourceUrl) ? h('p', { class: 'fine' }, link(i.sourceUrl, 'Source')) : null));
-  }));
+        i.fix ? h('p', { class: 'fix' }, h('b', { text: 'Fix: ' }), i.fix) : null,
+        safeUrl(i.sourceUrl) ? h('p', { class: 'fine' }, link(i.sourceUrl, 'Source')) : null)));
+  }
   upd();
   return h('section', { class: 'card', 'aria-labelledby': 'hygTitle' },
     h('div', { class: 'card-head' }, h('h2', { id: 'hygTitle', text: 'Steam hygiene checklist' }), progress),
-    h('p', { class: 'fine', style: 'margin:-4px 0 8px', text: 'Things data cannot check. Tick them off as you go; your ticks are remembered in this browser.' }), list);
+    h('p', { class: 'fine', style: 'margin:-4px 0 8px', text: 'Things data cannot check, by area and priority. Tick them off as you go; your ticks are remembered in this browser.' }), list);
+}
+
+/** Per-area score from diagnosis.areas, drawn as small single-hue meters with the number beside each. */
+function areaBreakdown(diag) {
+  const areas = diag.areas && typeof diag.areas === 'object' ? diag.areas : null;
+  if (!areas) return null;
+  const known = AREAS.map(([id]) => id);
+  const ids = [...known.filter((id) => areas[id]), ...Object.keys(areas).filter((id) => !known.includes(id))];
+  const rows = ids.map((id) => {
+    const a = areas[id]; const label = (AREAS.find(([x]) => x === id) || [id, humanize(id)])[1];
+    const sc = a && typeof a.score === 'number' ? a.score : null;
+    return h('li', { class: 'ab' }, h('span', { class: 'ab-l', text: label }),
+      sc == null ? h('span', { class: 'fine', text: 'Not scored' })
+        : h('div', { class: 'meter', role: 'img', 'aria-label': `${label} score ${sc} out of 100` }, h('span', { class: 'track' }, h('span', { class: 'fill', style: `width:${clampPct(sc)}%` })), h('span', { class: 'val', text: String(sc) })),
+      a && a.weight != null ? h('span', { class: 'fine ab-w', text: `weight ${a.weight}` }) : null);
+  });
+  return h('div', { class: 'area-break' }, h('h3', { text: 'Score by area' }), h('ul', { class: 'ab-list' }, rows));
 }
