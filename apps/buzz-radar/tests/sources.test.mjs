@@ -88,7 +88,7 @@ test("demoPosts shape, count, determinism", () => {
   const a = demoPosts("Starfall Odyssey", now), b = demoPosts("Starfall Odyssey", now);
   assert.deepEqual(a, b);
   assert.notDeepEqual(a.map((p) => p.id + p.author), demoPosts("Other Game", now).map((p) => p.id + p.author));
-  assert.ok(a.length >= 200 && a.length <= 300, "count " + a.length);
+  assert.ok(a.length >= 250 && a.length <= 320, "count " + a.length);
   assert.equal(new Set(a.map((p) => p.id)).size, a.length);
   a.forEach((p) => { checkShape(p); assert.ok(p.url.startsWith("https://example.com/demo/")); assert.ok(Date.parse(p.publishedAt) <= now && Date.parse(p.publishedAt) >= now - 31 * 86400000); });
   assert.ok(new Set(a.map((p) => p.source)).size >= 5);
@@ -98,6 +98,10 @@ test("demoPosts shape, count, determinism", () => {
   assert.ok(span <= 62 * 3600000, "wave span h " + span / 3600000);
   assert.ok(new Set(ad.map((p) => p.authorId)).size >= 20);
   assert.ok(a.every((p) => !p.text.includes("<") ));
+  for (const s of ["tiktok", "instagram", "x", "facebook"]) assert.ok(a.filter((p) => p.source === s).length >= 8, s);
+  assert.ok(a.filter((p) => p.source === "tiktok").every((p) => p.kind === "short" && p.metrics.views > 0));
+  assert.ok(a.filter((p) => ["tiktok", "instagram"].includes(p.source) && /#ad|#sponsored/.test(p.text)).length >= 6);
+  assert.ok(a.some((p) => p.source === "tiktok" && p.metrics.views >= 2000000));
   assert.ok(a.some((p) => p.title.includes("Starfall Odyssey")));
 });
 

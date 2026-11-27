@@ -118,5 +118,44 @@ export function demoPosts(game = "Sample Game", now = Date.now()) {
   // a handful of echo posts on social about the wave
   for (let i = 0; i < 6; i++) add({ source: pick(["bluesky", "mastodon"]), kind: "post", c: creator(ri(0, 89)), t: wave + r(2, 60) * H, text: `New video up: ${pick(waveTitles)(0)} #ad #${gt}`, likes: ri(3, 150), comments: ri(0, 20), tags: ["ad", gt] });
 
+  // 6) TikTok / Instagram / X / Facebook coverage. Uses its own PRNG so the clusters above are unchanged.
+  const r2 = mulberry32(seedFrom("extra:" + game));
+  const q = (a, b) => a + r2() * (b - a), qi = (a, b) => Math.floor(q(a, b + 1)), qp = (a) => a[Math.floor(r2() * a.length)];
+  const pool2 = [];
+  for (let i = 0; i < 40; i++) { const name = `${qp(FIRST)}${qp(SECOND)}${100 + i}`; pool2.push({ name, id: "demo-" + name.toLowerCase(), followers: Math.round(Math.exp(q(7, 13.5))) }); }
+  const c2 = () => qp(pool2);
+  const shortDisc = [` #ad`, ` #sponsored`, ` #partner`, ` Paid partnership with ${PUBLISHER}`, ``, ` #ad #${gt}`];
+  const wTitle = [`${g} is wild, first time playing`, `POV: you finally try ${g}`, `${g} first impressions in 60 seconds`];
+  // sponsored wave echoes (~5 days ago, same 48h window)
+  for (let i = 0; i < 10; i++) {
+    const c = { ...c2(), followers: qi(30000, 600000) }, d = i < 6 ? shortDisc[i] : ``;
+    add({ source: "tiktok", kind: "short", c, t: wave + q(0, 48) * H, text: `${qp(wTitle)}${d} #${gt} #fyp`, views: Math.round(c.followers * q(0.3, 1.2)), likes: qi(2000, 40000), comments: qi(40, 900), tags: [gt, "fyp", ...(d.includes("#ad") ? ["ad"] : []), ...(d.includes("#sponsored") ? ["sponsored"] : [])] });
+  }
+  for (let i = 0; i < 8; i++) {
+    const c = { ...c2(), followers: qi(20000, 300000) }, d = [` #ad`, ` #sponsored`, ` Paid partnership with ${PUBLISHER}`, ``][i % 4];
+    add({ source: "instagram", kind: i % 2 ? "short" : "post", c, t: wave + q(0, 50) * H, text: `${qp(wTitle)}${d} #${gt} #gaming`, views: i % 2 ? Math.round(c.followers * q(0.2, 0.8)) : null, likes: Math.round(c.followers * q(0.02, 0.07)), comments: qi(10, 200), tags: [gt, "gaming", ...(d.includes("#ad") ? ["ad"] : []), ...(d.includes("#sponsored") ? ["sponsored"] : [])] });
+  }
+  for (let i = 0; i < 2; i++) add({ source: "x", kind: "post", c: c2(), t: wave + q(0, 48) * H, text: `New video is live, sponsored by ${PUBLISHER} #ad #${gt}`, views: qi(2000, 30000), likes: qi(10, 400), comments: qi(0, 40), tags: ["ad", gt] });
+  // launch spike (~22 days ago): X-heavy
+  const xl = [`${g} is out! first hour impressions`, `Just bought ${g}, no regrets so far`, `${g} servers are melting on launch day`, `${g} launch trailer is incredible`];
+  for (let i = 0; i < 8; i++) add({ source: "x", kind: "post", c: c2(), t: launch + Math.pow(r2(), 1.8) * 3 * D, text: `${qp(xl)} #${gt}`, views: qi(500, 90000), likes: qi(5, 3000), comments: qi(0, 300), tags: [gt] });
+  for (let i = 0; i < 4; i++) add({ source: "tiktok", kind: "short", c: c2(), t: launch + r2() * 3 * D, text: `${g} launch day reaction #${gt} #gaming`, views: qi(5000, 400000), likes: qi(300, 40000), comments: qi(10, 800), tags: [gt, "gaming"] });
+  for (let i = 0; i < 3; i++) add({ source: "instagram", kind: "post", c: c2(), t: launch + r2() * 3 * D, text: `${g} is finally here #${gt} #launch`, likes: qi(100, 5000), comments: qi(2, 120), tags: [gt, "launch"] });
+  for (let i = 0; i < 3; i++) add({ source: "facebook", kind: "post", c: c2(), t: launch + r2() * 3 * D, text: `${g} is out now! Who is playing tonight?`, likes: qi(20, 1500), comments: qi(2, 200), tags: [] });
+  // patch wave (~10 days ago)
+  const xp = [`${g} patch 1.4 notes are live`, `The ${g} Season 2 balance changes are huge`, `${g} update broke my save, anyone else?`];
+  for (let i = 0; i < 7; i++) add({ source: "x", kind: "post", c: c2(), t: patch + Math.pow(r2(), 1.5) * 2 * D, text: `${qp(xp)} #${gt} #patchnotes`, views: qi(300, 40000), likes: qi(2, 900), comments: qi(0, 120), tags: [gt, "patchnotes"] });
+  for (let i = 0; i < 2; i++) add({ source: "facebook", kind: "post", c: c2(), t: patch + r2() * 2 * D, text: `${g} Season 2 patch notes discussion`, likes: qi(10, 600), comments: qi(1, 90), tags: [] });
+  // organic viral clip led by TikTok (~14 days ago): the original lands first, then reposts spread
+  add({ source: "tiktok", kind: "short", c: { ...c2(), followers: 18000 }, t: viral - 3 * H, text: `bro the ${g} physics bug sent the boss to space #${gt} #funny`, views: 2600000, likes: 410000, comments: 9800, tags: [gt, "funny"] });
+  for (let i = 0; i < 5; i++) add({ source: "tiktok", kind: "short", c: c2(), t: viral + q(2, 48) * H, text: `stitching that ${g} boss clip #${gt} #fyp`, views: qi(8000, 250000), likes: qi(500, 30000), comments: qi(10, 600), tags: [gt, "fyp"] });
+  add({ source: "x", kind: "post", c: c2(), t: viral + 5 * H, text: `this ${g} clip from TikTok has me crying #${gt}`, views: 900000, likes: 38000, comments: 1200, tags: [gt] });
+  add({ source: "instagram", kind: "short", c: c2(), t: viral + 9 * H, text: `Repost of the viral ${g} clip #${gt} #funny`, views: qi(20000, 90000), likes: qi(1000, 9000), comments: qi(20, 300), tags: [gt, "funny"] });
+  // steady background
+  for (let i = 0; i < 6; i++) add({ source: "tiktok", kind: "short", c: c2(), t: now - q(0.3, 30) * D, text: `${qp(bgTitles)} #${gt}`, views: qi(300, 60000), likes: qi(10, 5000), comments: qi(0, 200), tags: [gt] });
+  for (let i = 0; i < 5; i++) add({ source: "instagram", kind: "post", c: c2(), t: now - q(0.3, 30) * D, text: `${qp(bgTitles)} #${gt} #gaming`, likes: qi(5, 900), comments: qi(0, 40), tags: [gt, "gaming"] });
+  for (let i = 0; i < 3; i++) add({ source: "x", kind: "post", c: c2(), t: now - q(0.3, 30) * D, text: `${qp(bgTitles)} #${gt}`, views: qi(100, 8000), likes: qi(0, 300), comments: qi(0, 30), tags: [gt] });
+  for (let i = 0; i < 3; i++) add({ source: "facebook", kind: "post", c: c2(), t: now - q(0.3, 30) * D, text: qp(bgTitles), likes: qi(2, 300), comments: qi(0, 50), tags: [] });
+
   return posts.sort((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt));
 }
