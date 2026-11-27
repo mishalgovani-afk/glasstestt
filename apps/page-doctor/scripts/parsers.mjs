@@ -283,7 +283,7 @@ export function parsePopularTags(json) {
  * Merge store details + SteamSpy + search-row + reviews into one corpus game (the contract schema).
  * `fallbackTags` is a list of tag names (no votes known) used only if SteamSpy has none.
  */
-export function buildGame({ store, spy = null, row = null, reviews = null, fallbackTags = [], storeTags = [] }) {
+export function buildGame({ store, spy = null, row = null, reviews = null, fallbackTags = [], storeTags = [], followers = null }) {
   if (!store) return null;
   const spyTags = spy?.tags?.length ? spy.tags : [];
   let tags = spyTags;
@@ -293,15 +293,39 @@ export function buildGame({ store, spy = null, row = null, reviews = null, fallb
   if (!rev && row && row.reviewTotal != null) rev = { total: row.reviewTotal, positivePct: row.reviewPct, scoreDesc: row.reviewDesc || reviewDesc(row.reviewTotal, row.reviewPct ?? 0) };
   if (!rev && spy && spy.totalReviews != null) rev = { total: spy.totalReviews, positivePct: spy.positivePct, scoreDesc: reviewDesc(spy.totalReviews, spy.positivePct ?? 0) };
   if (!rev && store.totalRecommendations != null) rev = { total: store.totalRecommendations, positivePct: null, scoreDesc: null };
+  if (store.comingSoon) rev = null;
   const { releaseIso, totalRecommendations, ...rest } = store;
   return {
     ...rest,
     tags,
     reviews: rev ? { total: rev.total ?? null, positivePct: rev.positivePct ?? null, scoreDesc: rev.scoreDesc ?? null } : { total: null, positivePct: null, scoreDesc: null },
-    followers: null,
+    followers: Number.isFinite(followers) ? followers : null,
     ownersRange: spy?.owners ?? null,
     ccu: spy?.ccu ?? null,
   };
+}
+
+/** Steam community group XML (steamcommunity.com/games/<appid>/memberslistxml/?xml=1) -> member (follower) count or null. */
+export function parseMemberCount(xml) {
+  const s = String(xml ?? "");
+  const m = s.match(/<groupDetails>[\s\S]*?<memberCount>\s*(\d+)\s*<\/memberCount>/) || s.match(/<memberCount>\s*(\d+)\s*<\/memberCount>/);
+  return m ? Number(m[1]) : null;
+}
+
+/** Pick `n` items spread evenly across a list (keeps variety when a list is sorted by popularity). */
+export function pickEvenly(list, n) {
+  if (n <= 0) return [];
+  if (list.length <= n) return list.slice();
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(list[Math.floor((i * list.length) / n)]);
+  return out;
+}
+
+/** Split a per-tag target into hit / mid / upcoming quotas (about a third each). */
+export function bucketQuotas(perTag) {
+  const hit = Math.ceil(perTag / 3);
+  const mid = Math.round(perTag / 3);
+  return { hit, mid, upcoming: Math.max(0, perTag - hit - mid) };
 }
 
 /** Is an ISO yyyy-mm-dd date within the last `years` years of `now`? */

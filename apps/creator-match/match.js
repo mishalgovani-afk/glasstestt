@@ -81,7 +81,12 @@ export const GUIDE = {
 // ---------------------------------------------------------------------------
 
 /** Points per component; they add up to 100. */
-export const WEIGHTS = Object.freeze({ affinity: 30, coverage: 25, activity: 15, size: 15, engagement: 10, language: 5 });
+export const WEIGHTS = Object.freeze({ affinity: 25, coverage: 25, indie: 10, activity: 15, size: 12, engagement: 8, language: 5 });
+
+// Tags that nearly every indie game has: they still count, but at 30% weight, so they cannot carry a match alone.
+export const GENERIC_TAGS = new Set(["indie", "singleplayer", "multiplayer", "early access", "free to play", "great soundtrack",
+  "steam achievements", "full controller support", "controller", "2d", "3d", "casual", "atmospheric", "colorful", "cute",
+  "family friendly", "steam trading cards", "steam cloud"]);
 
 /** Follower thresholds: a creator is in the first tier whose `max` exceeds their followers. */
 export const SIZE_TIERS = Object.freeze([
@@ -160,18 +165,35 @@ function trimNum(x) {
   return String(r);
 }
 
-// Tag weights by position: first tag 1.0, then -0.1 per place, floor 0.2.
+// Target tags may be an array of strings, an array of {name}, or a comma-separated string.
+function tagList(tags) {
+  const list = typeof tags === "string" ? tags.split(/[,;\n]+/) : arr(tags);
+  return list.map((t) => str(typeof t === "object" && t ? t.name : t).trim()).filter(Boolean);
+}
+
+// Tag weights by position: first tag 1.0, then -0.1 per place, floor 0.2; generic tags × 0.3.
 function tagWeights(tags) {
   const out = new Map();
-  arr(tags).forEach((t, i) => {
-    const k = lc(typeof t === "object" && t ? t.name : t);
-    if (k && !out.has(k)) out.set(k, Math.max(0.2, 1 - 0.1 * out.size));
-  });
+  for (const name of tagList(tags)) {
+    const k = lc(name);
+    if (out.has(k)) continue;
+    const w = Math.max(0.2, 1 - 0.1 * out.size);
+    out.set(k, GENERIC_TAGS.has(k) ? w * 0.3 : w);
+  }
   return out;
 }
 
 function gameTagsOf(g) {
   return arr(g && g.tags).map((t) => lc(typeof t === "object" && t ? t.name : t)).filter(Boolean);
+}
+
+// What we know about a game beyond its tags (all optional): review count and whether it is out yet.
+function gameInfo(g) {
+  const r = g.reviews;
+  const reviews = num(r && typeof r === "object" ? r.total : r) ?? num(g.reviewCount) ?? num(g.totalReviews);
+  const rel = toTime(g.releaseDate);
+  const upcoming = g.comingSoon === true || g.coming_soon === true || g.released === false || g.earlyAccess === true ? true : null;
+  return { tags: gameTagsOf(g), reviews, upcoming, releaseT: rel };
 }
 
 // Index of data.games by appid and by lowercased name.
@@ -180,12 +202,30 @@ function buildGameIndex(data) {
   const byName = new Map();
   for (const g of arr(data && data.games)) {
     if (!g || typeof g !== "object") continue;
-    const tags = gameTagsOf(g);
-    if (num(g.appid) != null) byId.set(g.appid, tags);
+    const info = gameInfo(g);
+    if (num(g.appid) != null) byId.set(g.appid, info);
     const n = lc(g.name);
-    if (n && !byName.has(n)) byName.set(n, tags);
+    if (n && !byName.has(n)) byName.set(n, info);
   }
   return { byId, byName };
+}
+
+const INDIE_WORDS = /\b(demo|next ?fest|playtest|prologue|early access|upcoming|unreleased|pre-?release|preview|first look|hidden gems?|indie games?|wishlist)\b/i;
+
+/**
+ * How "small indie" a covered game looks, 0..1, or null when there's no signal.
+ * Upcoming / demo / Next Fest coverage → 1; otherwise by Steam review count (mega-hits → 0).
+ */
+function indieSignal(g, info, now) {
+  if (info && (info.upcoming || (info.releaseT != null && g && toTime(g.date) != null && toTime(g.date) < info.releaseT))) return 1;
+  if (INDIE_WORDS.test(`${str(g && g.title)} ${str(g && g.name)}`)) return 1;
+  const reviews = info ? info.reviews : null;
+  if (reviews == null) return null;
+  if (reviews < 1000) return 1;
+  if (reviews < 5000) return 0.75;
+  if (reviews < 20000) return 0.45;
+  if (reviews < 100000) return 0.15;
+  return 0;
 }
 
 function prepareTarget(target) {
@@ -199,7 +239,7 @@ function prepareTarget(target) {
     nameKey: lc(t.name),
     weights,
     total,
-    tagNames: arr(t.tags).map((x) => str(typeof x === "object" && x ? x.name : x).trim()).filter(Boolean),
+    tagNames: tagList(t.tags),
     language: normalizeLanguage(t.language),
   };
 }
@@ -226,11 +266,21 @@ const COVERAGE_CAP = 2; // Σ similarity × recency is capped here, then divided
 function matchGames(creator, tgt, index, now) {
   const out = [];
   let coveredTarget = null;
+  const indie = { n: 0, sum: 0, small: 0, mega: 0, total: 0, megaExample: "" };
   for (const g of arr(creator.coveredGames)) {
     if (!g || typeof g !== "object") continue;
+    indie.total++;
     const appid = num(g.appid);
     const isTarget = (tgt.appid != null && appid === tgt.appid) || (!!tgt.nameKey && lc(g.name) === tgt.nameKey);
-    const tags = g.tags ? gameTagsOf(g) : (appid != null && index.byId.get(appid)) || index.byName.get(lc(g.name)) || [];
+    const known = (appid != null && index.byId.get(appid)) || index.byName.get(lc(g.name)) || null;
+    const info = g.tags || g.reviews != null || g.comingSoon != null ? { ...(known || {}), ...gameInfo(g) } : known;
+    const tags = (info && info.tags && info.tags.length ? info.tags : known && known.tags) || [];
+    const sig = indieSignal(g, info, now);
+    if (sig != null) {
+      indie.n++; indie.sum += sig;
+      if (sig >= 0.75) indie.small++;
+      if (sig === 0) { indie.mega++; if (!indie.megaExample) indie.megaExample = str(g.name); }
+    }
     const { sim, shared } = similarity(tags, tgt);
     const t = toTime(g.date);
     const daysAgo = t == null ? null : Math.max(0, Math.floor((now - t) / DAY));
@@ -244,10 +294,10 @@ function matchGames(creator, tgt, index, now) {
     if (sim >= MATCH_THRESHOLD) out.push(m);
   }
   out.sort((a, b) => b.weight - a.weight || (b.views || 0) - (a.views || 0) || a.name.localeCompare(b.name));
-  return { matched: out, coveredTarget };
+  return { matched: out, coveredTarget, indie };
 }
 
-function lastActiveTime(creator, matchedAll) {
+function lastActiveTime(creator) {
   const t = toTime(creator.lastActive);
   if (t != null) return t;
   let best = null;
@@ -266,10 +316,11 @@ function affinityScore(creator, tgt, matched) {
   const tagCounts = new Map();
   for (const g of matched) for (const k of g.sharedTags) tagCounts.set(k, (tagCounts.get(k) || 0) + 1);
   const covered = Math.max(1, arr(creator.coveredGames).length);
+  const explicit = affLc.size > 0; // trust the data's tagAffinity when it has one
   let s = 0;
   const parts = [];
   for (const [k, w] of tgt.weights) {
-    const a = Math.max(affLc.get(k) || 0, clamp01((tagCounts.get(k) || 0) / covered));
+    const a = explicit ? affLc.get(k) || 0 : clamp01((tagCounts.get(k) || 0) / covered);
     if (a > 0) { s += w * a; parts.push({ tag: k, value: a, contrib: w * a }); }
   }
   parts.sort((x, y) => y.contrib - x.contrib);
@@ -284,8 +335,9 @@ function platformList(p) {
 
 /**
  * Rank creators for a target game.
- * Score (0..100) = 30 × tag affinity + 25 × similar coverage + 15 × activity + 15 × size fit
- *                 + 10 × engagement + 5 × language, each component 0..1 (see `breakdown`).
+ * Score (0..100) = 25 × tag affinity + 25 × similar coverage + 10 × indie focus + 15 × activity
+ *                 + 12 × size fit + 8 × engagement + 5 × language, each component 0..1 (see `breakdown`).
+ * Works from tags alone: target = { name, tags } is enough; appid only spots past coverage of the game itself.
  * Options: platform (string or array), minFollowers, maxFollowers, language, activeWithinDays = 90 (0/null = off),
  *   sizeWeights {micro, small, mid, large, unknown}, now (ms or ISO), limit, excludeIds (array/Set), includeIrrelevant.
  */
@@ -317,7 +369,7 @@ export function rankCreators(target, data, options = {}) {
     const inactiveDays = lastT == null ? null : Math.max(0, Math.floor((now - lastT) / DAY));
     if (activeDays && inactiveDays != null && inactiveDays > activeDays) continue;
 
-    const { matched, coveredTarget } = matchGames(creator, tgt, index, now);
+    const { matched, coveredTarget, indie: indieStats } = matchGames(creator, tgt, index, now);
     const affinity = affinityScore(creator, tgt, matched);
     if (!opts.includeIrrelevant && affinity.value === 0 && !matched.length && !coveredTarget) continue;
 
@@ -326,6 +378,10 @@ export function rankCreators(target, data, options = {}) {
     for (const m of matched) covSum += m.weight;
     if (coveredTarget) covSum += coveredTarget.weight + 0.5; // past coverers convert best
     const coverage = clamp01(covSum / COVERAGE_CAP);
+
+    // Indie focus: average small-game signal over all coverage; neutral 0.5 without data.
+    // Shrunk toward 0.5 with few data points, so one demo video doesn't max it out.
+    const indie = indieStats.n ? (indieStats.sum + 0.5) / (indieStats.n + 1) : 0.5;
 
     const upm = num(creator.uploadsPerMonth);
     const recentPart = inactiveDays == null ? 0.4 : Math.pow(0.5, inactiveDays / 45);
@@ -346,6 +402,7 @@ export function rankCreators(target, data, options = {}) {
     const breakdown = {
       affinity: round1(WEIGHTS.affinity * affinity.value),
       coverage: round1(WEIGHTS.coverage * coverage),
+      indie: round1(WEIGHTS.indie * indie),
       activity: round1(WEIGHTS.activity * activity),
       size: round1(WEIGHTS.size * size),
       engagement: round1(WEIGHTS.engagement * engagement),
@@ -358,7 +415,7 @@ export function rankCreators(target, data, options = {}) {
     results.push({
       creator,
       score,
-      reasons: buildReasons({ creator, tgt, matched, coveredTarget, affinity, followers, avgViews, ratio, tier, inactiveDays, upm, platform, lang, wantL }),
+      reasons: buildReasons({ creator, tgt, matched, coveredTarget, affinity, indieStats, followers, avgViews, ratio, tier, inactiveDays, upm, platform, lang, wantL }),
       matchedGames,
       sizeTier: tier || "micro",
       sizeKnown: tier != null,
@@ -398,7 +455,7 @@ function displayTag(tgt, key) {
 function plural(n, one, many) { return n === 1 ? one : many; }
 
 function buildReasons(c) {
-  const { tgt, matched, coveredTarget, affinity, followers, avgViews, ratio, tier, inactiveDays, upm, platform, lang, wantL } = c;
+  const { tgt, matched, coveredTarget, affinity, indieStats, followers, avgViews, ratio, tier, inactiveDays, upm, platform, lang, wantL } = c;
   const reasons = [];
   const verb = platform === "steam-curator" ? "Reviewed" : platform === "twitch" ? "Streamed" : "Covered";
 
@@ -420,7 +477,12 @@ function buildReasons(c) {
     const views = top.views != null ? ` (${formatCount(top.views)} views)` : "";
     reasons.push(`${verb} ${list.length} ${label}${span}, incl. '${top.name || top.title}'${views}`);
   }
-  if (affinity.parts.length) {
+  if (indieStats.n >= 2 && indieStats.small / indieStats.n >= 0.5) {
+    reasons.push(`Covers small indies: ${indieStats.small} of ${indieStats.n} rated games were demos, upcoming or under 5K reviews`);
+  } else if (indieStats.n >= 2 && indieStats.mega / indieStats.n >= 0.5) {
+    reasons.push(`Mostly covers big hits: ${indieStats.mega} of ${indieStats.n} games have 100K+ reviews, e.g. '${indieStats.megaExample}'`);
+  }
+  if (affinity.parts.length && reasons.length < 3) {
     const tags = affinity.parts.slice(0, 2).map((p) => `${displayTag(tgt, p.tag)} ${Math.round(p.value * 100)}%`).join(", ");
     reasons.push(`Tag fit ${Math.round(affinity.value * 100)}%: ${tags}`);
   }
@@ -468,112 +530,160 @@ function firstName(name) {
   return n || "there";
 }
 
+/** Is the target still unreleased? Explicit flags win; a past releaseDate means launched; otherwise assume pre-launch. */
+export function isPrelaunch(target, now = Date.now()) {
+  const t = target && typeof target === "object" ? target : {};
+  if (t.released === true) return false;
+  if (t.comingSoon === true || t.released === false) return true;
+  const rel = toTime(t.releaseDate);
+  const ref = toTime(now) ?? Date.now();
+  if (rel != null) return rel > ref;
+  return true; // the usual case for this tool: a game with no Steam page or release yet
+}
+
+const GENERIC_TITLE = /^(not )?recommended$|^informational$/i;
+const ACCESS = ["key", "demo", "playtest", "none"];
+
 /**
  * Draft a short, specific pitch. Unknowns stay as [bracketed placeholders] for the user to fill in.
- * options: publisher, keyOffer = true, tone = "friendly"|"professional"|"brief", senderName, steamKey,
- *   launchDate, embargoDate, pressKitUrl, steamUrl, hook, matchedGames (from rankCreators), data (to find matches).
- * Returns { subject, body, wordCount, placeholders }.
+ * options: publisher, keyOffer = true, tone = "friendly"|"professional"|"brief",
+ *   access = "key"|"demo"|"playtest"|"none" (default "key", or "none" when keyOffer is false),
+ *   prelaunch (default: isPrelaunch(target)), senderName, steamKey, launchDate, releaseWindow, embargoDate,
+ *   pressKitUrl, trailerUrl, demoUrl, pressKit: false (no press kit: drop that line), steamUrl, hook,
+ *   matchedGames (from rankCreators) or data (to find matches), now.
+ * Returns { subject, body, wordCount, placeholders, prelaunch }.
  */
 export function draftPitch(creator, target, options = {}) {
   const o = options && typeof options === "object" ? options : {};
+  let p = buildPitch(creator, target, o, 28, true);
+  if (p.wordCount >= PITCH_WORD_LIMIT) p = buildPitch(creator, target, o, 12, false);
+  return p;
+}
+
+function buildPitch(creator, target, o, hookWords, withTitle) {
   const c = creator && typeof creator === "object" ? creator : {};
   const t = target && typeof target === "object" ? target : {};
+  const now = referenceTime(o.data, o.now);
   const tone = TONES.includes(o.tone) ? o.tone : "friendly";
   const platform = normalizePlatform(c.platform) || "youtube";
+  const curator = platform === "steam-curator";
+  const pre = typeof o.prelaunch === "boolean" ? o.prelaunch : isPrelaunch(t, now);
+  const access = ACCESS.includes(o.access) ? o.access : o.keyOffer === false ? "none" : "key";
+
   const game = clean(t.name, 8) || "[game name]";
-  const publisher = clean(o.publisher, 6) || "[publisher]";
+  const publisher = clean(o.publisher || t.publisher, 6) || "[publisher]";
   const sender = clean(o.senderName, 4) || "[your name]";
   const launch = clean(o.launchDate || t.launchDate || t.releaseDate, 6) || "[launch date]";
-  const embargo = clean(o.embargoDate || t.embargoDate, 6) || "[embargo date]";
-  const pressKit = httpsOrNull(o.pressKitUrl || t.pressKitUrl) || "[press kit link]";
-  const steamUrl = httpsOrNull(o.steamUrl || t.url) || (num(t.appid) != null ? `https://store.steampowered.com/app/${t.appid}/` : "[Steam page link]");
-  const hook = clean(o.hook || t.hook || t.shortDescription, 28) || "[one-line hook: what makes it different]";
-  const keyText = clean(o.steamKey, 3) || "[Steam key]";
+  const window = clean(o.releaseWindow || t.releaseWindow || o.launchDate || t.launchDate || t.releaseDate, 6) || "[release window]";
+  const embargo = clean(o.embargoDate || t.embargoDate, 6) || (pre ? "[embargo date, if any]" : "[embargo date]");
+  const pressKit = httpsOrNull(o.pressKitUrl || t.pressKitUrl);
+  const trailer = httpsOrNull(o.trailerUrl || t.trailerUrl);
+  const steamUrl = httpsOrNull(o.steamUrl || t.url) || (num(t.appid) != null ? `https://store.steampowered.com/app/${t.appid}/` : null);
+  const demoUrl = httpsOrNull(o.demoUrl || t.demoUrl) || steamUrl || "[demo link]";
+  const hook = clean(o.hook || t.hook || t.pitch || t.shortDescription, hookWords) || "[one-line hook: what makes it different]";
+  const keyText = clean(o.steamKey, 3) || (access === "playtest" ? "[playtest key]" : "[Steam key]");
 
   // Which of the creator's recent games to mention: the best match.
   let matches = arr(o.matchedGames);
   if (!matches.length) {
-    const tgt = prepareTarget(t);
-    const r = matchGames(c, tgt, buildGameIndex(o.data), referenceTime(o.data, o.now));
+    const r = matchGames(c, prepareTarget(t), buildGameIndex(o.data), now);
     matches = r.coveredTarget ? [r.coveredTarget, ...r.matched] : r.matched;
   }
-  const best = matches.find((m) => m && !m.isTarget) || null;
-  const pastTarget = matches.find((m) => m && m.isTarget) || null;
+  const best = matches.find((m) => m && typeof m === "object" && !m.isTarget) || null;
+  const pastTarget = matches.find((m) => m && typeof m === "object" && m.isTarget) || null;
   const refGame = best ? clean(best.name || best.title, 8) : "";
-  const refTitle = best && best.title && clean(best.title, 12) !== refGame ? clean(best.title, 12) : "";
-  const tagList = arr(t.tags).slice(0, 3).map((x) => clean(typeof x === "object" && x ? x.name : x, 3)).filter(Boolean);
-  const shared = best && arr(best.sharedTags).length
-    ? arr(best.sharedTags).slice(0, 2).map((k) => clean(tagList.find((n) => lc(n) === lc(k)) || k, 3))
-    : [];
-  const genre = shared.length ? joinAnd(shared) : tagList.length ? joinAnd(tagList.slice(0, 2)) : "[genre]";
+  const rawTitle = best ? clean(best.title, 12) : "";
+  const refTitle = withTitle && rawTitle && rawTitle !== refGame && !GENERIC_TITLE.test(rawTitle) && rawTitle.split(" ").length > 2 ? rawTitle : "";
+  const tags = tagList(t.tags).slice(0, 3).map((x) => clean(x, 3)).filter(Boolean);
+  const shared = best ? arr(best.sharedTags).filter((k) => !GENERIC_TAGS.has(lc(k))).slice(0, 2)
+    .map((k) => clean(tags.find((n) => lc(n) === lc(k)) || k, 3)) : [];
+  const genre = shared.length ? joinAnd(shared) : tags.length ? joinAnd(tags.slice(0, 2)) : "[genre]";
+  const where = curator ? "curator page" : "channel";
 
   const name = firstName(c.name);
-  const greet = tone === "professional" ? `Hello ${name},` : tone === "brief" ? `Hi ${name},` : `Hi ${name}!`;
-  const lines = [greet, ""];
+  const lines = [tone === "professional" ? `Hello ${name},` : tone === "brief" ? `Hi ${name},` : `Hi ${name}!`, ""];
 
-  const what = platform === "steam-curator" ? "review" : platform === "twitch" ? "stream" : "video";
   let ref;
   if (pastTarget) {
-    ref = `You covered ${game} before, so here is an update: ${game} launches ${launch}.`;
+    ref = `You covered ${game} before, so here's an update.`;
   } else if (refGame) {
-    ref = `You recently ${platform === "steam-curator" ? "reviewed" : platform === "twitch" ? "streamed" : "covered"} ${refGame}${refTitle ? ` ("${refTitle}")` : ""}. ${game} is also a ${genre} game, so it might suit your ${platform === "steam-curator" ? "curator page" : "channel"}.`;
+    const verb = curator ? "reviewed" : platform === "twitch" ? "streamed" : "covered";
+    ref = `You recently ${verb} ${refGame}${refTitle ? ` ("${refTitle}")` : ""}. ${game} is ${pre ? "an upcoming" : "also a"} ${genre} game, so it might suit your ${where}.`;
   } else {
-    ref = `I think ${game} might suit your ${platform === "steam-curator" ? "curator page" : "channel"}: it's a ${genre} game, like [similar game you covered].`;
+    ref = `${game} is ${pre ? "an upcoming" : "a"} ${genre} game, like [similar game you covered], so it might suit your ${where}.`;
   }
-  lines.push(tone === "brief" ? ref : `I'm ${sender} from ${publisher}. ${ref}`);
-  lines.push("");
-  lines.push(`${game}: ${hook}`);
-  lines.push("");
+  lines.push(tone === "brief" ? ref : `I'm ${sender} from ${publisher}. ${ref}`, "", `${game}: ${hook}`, "");
 
-  if (platform === "steam-curator") {
-    lines.push(o.keyOffer === false
-      ? "Happy to send a copy through Steam Curator Connect if you'd like one."
-      : "I've sent you a copy through Steam Curator Connect, so it's waiting in your Steam library.");
-  } else if (o.keyOffer === false) {
-    lines.push("Happy to send a Steam key if you'd like one.");
+  // Access: key, demo, playtest, or an offer.
+  const build = pre ? "preview build" : "game";
+  if (curator) {
+    if (access === "none") lines.push("Happy to send a copy through Steam Curator Connect if you'd like one.");
+    else if (access === "demo") lines.push(`The free demo is on Steam: ${demoUrl}. I can send the full ${build} through Curator Connect.`);
+    else if (pre && !steamUrl) lines.push(`I'll send the ${build} through Steam Curator Connect as soon as our Steam page is live.`);
+    else lines.push(`I've sent you the ${build} through Steam Curator Connect, so it's waiting in your Steam library.`);
+  } else if (access === "none") {
+    lines.push(`Happy to send a ${pre ? "preview" : "Steam"} key if you'd like one.`);
+  } else if (access === "demo") {
+    lines.push(`The free demo is on Steam: ${demoUrl}. Happy to send a full key too.`);
+  } else if (access === "playtest") {
+    lines.push(`Here's a key for our Steam playtest, no strings attached: ${keyText}`);
   } else {
-    lines.push(`Here's a Steam key, no strings attached: ${keyText}`);
+    lines.push(`Here's a Steam key${pre ? " for the preview build" : ""}, no strings attached: ${keyText}`);
   }
-  lines.push(`Embargo: ${embargo}. Launch: ${launch}.`);
-  lines.push(`Press kit: ${pressKit}`);
-  lines.push(`Steam page: ${steamUrl}`);
-  lines.push("");
 
-  const ask = platform === "steam-curator"
-    ? `Would you consider ${game} for a review on your curator page?`
-    : platform === "twitch"
-      ? `Would you be up for streaming ${game} during launch week?`
-      : `Would ${game} fit a ${what} on your channel after the embargo lifts?`;
+  if (pre) lines.push(access === "demo" ? `Release window: ${window}.` : `Release window: ${window}. Embargo: ${embargo}.`);
+  else lines.push(`Embargo: ${embargo}. Launch: ${launch}.`);
+  if (pressKit) lines.push(`Press kit: ${pressKit}`);
+  else if (trailer) lines.push(`Trailer: ${trailer}`);
+  else if (o.pressKit !== false) lines.push("Press kit or trailer: [press kit or trailer link]");
+  lines.push(`Steam page: ${steamUrl || "[Steam page link]"}`, "");
+
+  let ask;
+  if (pre) {
+    ask = curator
+      ? `Would you consider ${game} for your curator page? Before launch, wishlists help us most.`
+      : platform === "twitch"
+        ? `Would you be up for streaming the ${access === "demo" ? "demo" : access === "playtest" ? "playtest" : "preview"} before launch? A wishlist link in chat would help us most.`
+        : `Would ${game} fit a video before launch? A wishlist link in the description would help us most.`;
+  } else {
+    ask = curator
+      ? `Would you consider ${game} for a review on your curator page?`
+      : platform === "twitch"
+        ? `Would you be up for streaming ${game} during launch week?`
+        : `Would ${game} fit a video on your channel after the embargo lifts?`;
+  }
   lines.push(ask);
-  if (platform !== "steam-curator" && o.keyOffer !== false && tone !== "brief") {
-    lines.push("If you do cover it, please mention the key was free.");
-  }
-  lines.push("");
-  lines.push(tone === "professional" ? "Best regards," : tone === "brief" ? "Thanks," : "Thanks for reading,");
-  lines.push(`${sender}${publisher !== "[publisher]" || tone !== "brief" ? `, ${publisher}` : ""}`);
+  if (!curator && access !== "none" && tone !== "brief") lines.push(`If you do cover it, please mention ${access === "demo" ? "any free key" : "the key"} was free.`);
+  lines.push("", tone === "professional" ? "Best regards," : tone === "brief" ? "Thanks," : "Thanks for reading,");
+  lines.push(publisher === "[publisher]" && tone === "brief" ? sender : `${sender}, ${publisher}`);
 
   const body = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  const subjectGenre = shared[0] || tagList[0] || "";
-  const subject = platform === "steam-curator"
-    ? `Curator copy: ${game}${subjectGenre ? `, a ${subjectGenre} game` : ""}`
+  const g = shared[0] || tags.find((x) => !GENERIC_TAGS.has(lc(x))) || tags[0] || "";
+  const kind = pre ? `an upcoming ${g ? `${g} ` : ""}game` : g ? `a ${g} game` : "";
+  const subject = curator
+    ? `Curator copy: ${game}${kind ? `, ${kind}` : ""}`
     : refGame
-      ? `${game}: a ${subjectGenre || "new"} game for fans of ${refGame}`
-      : `Steam key for ${game}${subjectGenre ? `, a ${subjectGenre} game` : ""}`;
-  return { subject, body, wordCount: countWords(body), placeholders: placeholdersIn(`${subject}\n${body}`) };
+      ? `${game}: ${kind || "a new game"} for fans of ${refGame}`
+      : `${access === "demo" ? "Demo" : access === "playtest" ? "Playtest key" : pre ? "Preview key" : "Steam key"}: ${game}${kind ? `, ${kind}` : ""}`;
+  return { subject, body, wordCount: countWords(body), placeholders: placeholdersIn(`${subject}\n${body}`), prelaunch: pre };
 }
 
 /** One short follow-up for a creator who hasn't replied. Send it once, then move on. */
 export function draftFollowUp(creator, target, options = {}) {
   const o = options && typeof options === "object" ? options : {};
   const c = creator && typeof creator === "object" ? creator : {};
-  const game = clean(target && target.name, 8) || "[game name]";
+  const t = target && typeof target === "object" ? target : {};
+  const pre = typeof o.prelaunch === "boolean" ? o.prelaunch : isPrelaunch(t, referenceTime(o.data, o.now));
+  const game = clean(t.name, 8) || "[game name]";
   const sender = clean(o.senderName, 4) || "[your name]";
-  const launch = clean(o.launchDate || (target && target.launchDate), 6) || "[launch date]";
+  const when = pre
+    ? `Release window: ${clean(o.releaseWindow || t.releaseWindow || o.launchDate || t.releaseDate, 6) || "[release window]"}.`
+    : `Launch: ${clean(o.launchDate || t.launchDate || t.releaseDate, 6) || "[launch date]"}.`;
   const curator = normalizePlatform(c.platform) === "steam-curator";
   const body = [
     `Hi ${firstName(c.name)},`,
     "",
-    `Just a quick follow-up on ${game} in case my last email got buried. ${curator ? "The Curator Connect copy is still waiting in your Steam library." : "The key in that email still works."} Launch is ${launch}.`,
+    `Just a quick follow-up on ${game} in case my last email got buried. ${curator ? "The Curator Connect copy is still waiting in your Steam library." : "The key in that email still works."} ${when}`,
     "",
     "No worries if it's not for you; I won't chase again.",
     "",

@@ -138,7 +138,7 @@ let manualLangs = new Set();
 const els = {
   dataLine: $('#dataLine'), banners: $('#banners'), form: $('#searchForm'), q: $('#q'), searchBtn: $('#searchBtn'),
   pickList: $('#pickList'), examples: $('#examples'), exampleChips: $('#exampleChips'), notFound: $('#notFound'),
-  toggleManual: $('#toggleManual'), manualCard: $('#manualCard'), results: $('#results'),
+  results: $('#results'), tabManual: $('#tabManual'), tabSearch: $('#tabSearch'), panelManual: $('#panelManual'), panelSearch: $('#panelSearch'),
 };
 
 /* ---------- boot ---------- */
@@ -154,11 +154,11 @@ const els = {
     return;
   }
   renderDataStatus(corpus, els.dataLine, els.banners, `${fmtInt(corpus.games.length)} games`);
-  els.q.disabled = false; els.searchBtn.disabled = false;
+  els.q.disabled = false; els.searchBtn.disabled = false; $('#mSubmit').disabled = false;
   buildManualControls();
   buildExamples();
   const m = location.hash.match(/appid=(\d+)/);
-  if (m) auditAppid(Number(m[1]), { scroll: false });
+  if (m) { selectTab('search'); auditAppid(Number(m[1]), { scroll: false }); }
 })();
 
 /* ---------- search ---------- */
@@ -224,7 +224,7 @@ function showNotFound(what) {
     h('h3', { text: "Not in today's dataset" }),
     h('p', null, h('strong', { text: what }), " isn't one of the games in today's dataset, so it can't be compared yet."),
     h('p', null, "Once it's added to the watchlist it will be included in tomorrow's daily refresh. To add it, ask in chat (the watchlist is a small file the assistant edits for you)."),
-    h('p', null, 'Want results now? ', h('button', { type: 'button', class: 'linklike', onclick: () => openManual(true), text: 'Paste your page details' }), ' and audit any game, released or not, right away.'));
+    h('p', null, 'Want results now? ', h('button', { type: 'button', class: 'linklike', onclick: () => selectTab('manual', true), text: 'Enter your page details' }), ' and audit any game, released or not, right away.'));
   els.notFound.hidden = false;
 }
 function auditAppid(appid, opts) {
@@ -240,15 +240,18 @@ function auditGame(game, opts = {}) {
 }
 
 /* ---------- manual form ---------- */
-function openManual(focus) {
-  els.manualCard.hidden = false;
-  els.toggleManual.setAttribute('aria-expanded', 'true');
-  if (focus) { els.manualCard.scrollIntoView({ block: 'start' }); $('#mName').focus({ preventScroll: true }); }
+function selectTab(which, focus) {
+  const manual = which === 'manual';
+  els.tabManual.setAttribute('aria-selected', String(manual)); els.tabManual.tabIndex = manual ? 0 : -1;
+  els.tabSearch.setAttribute('aria-selected', String(!manual)); els.tabSearch.tabIndex = manual ? -1 : 0;
+  els.panelManual.hidden = !manual; els.panelSearch.hidden = manual;
+  if (focus) (manual ? $('#mName') : els.q).focus();
 }
-els.toggleManual.addEventListener('click', () => {
-  if (els.manualCard.hidden) openManual(true);
-  else { els.manualCard.hidden = true; els.toggleManual.setAttribute('aria-expanded', 'false'); }
-});
+els.tabManual.addEventListener('click', () => selectTab('manual'));
+els.tabSearch.addEventListener('click', () => selectTab('search'));
+for (const [from, key, to] of [[els.tabManual, 'ArrowRight', 'search'], [els.tabSearch, 'ArrowLeft', 'manual'], [els.tabManual, 'ArrowLeft', 'search'], [els.tabSearch, 'ArrowRight', 'manual']]) {
+  from.addEventListener('keydown', (e) => { if (e.key === key) { e.preventDefault(); selectTab(to, false); (to === 'manual' ? els.tabManual : els.tabSearch).focus(); } });
+}
 function buildManualControls() {
   const tagList = $('#tagList');
   for (const t of Object.keys(corpus.tagIndex || {}).sort()) tagList.append(h('option', { value: t }));
@@ -297,6 +300,8 @@ $('#manualForm').addEventListener('submit', (e) => {
   err.hidden = true;
   const price = Math.max(0, parseFloat($('#mPrice').value) || 0);
   const shots = Math.max(0, parseInt($('#mShots').value, 10) || 0);
+  const wishRaw = parseInt($('#mWish').value, 10);
+  const wish = Number.isFinite(wishRaw) && wishRaw >= 0 ? wishRaw : null;
   const game = {
     appid: null, name: $('#mName').value.trim() || 'Your game', url: null,
     shortDescription: desc, aboutText: $('#mAbout').value.trim(),
@@ -305,7 +310,7 @@ $('#manualForm').addEventListener('submit', (e) => {
     developers: [], publishers: [], headerImage: null, capsuleImage: null,
     screenshots: Array.from({ length: shots }, () => ''), movies: $('#mTrailer').checked ? 1 : 0,
     languages: [...manualLangs], fullAudioLanguages: [],
-    reviews: { total: null, positivePct: null, scoreDesc: null }, followers: null, ownersRange: null, ccu: null, hasDemo: null, earlyAccess: false,
+    reviews: { total: null, positivePct: null, scoreDesc: null }, followers: wish, ownersRange: null, ccu: null, hasDemo: null, earlyAccess: false,
   };
   try { history.replaceState(null, '', location.pathname + location.search); } catch { /* ignore */ }
   els.notFound.hidden = true;
@@ -358,6 +363,7 @@ function renderReport() {
   const counts = { pass: 0, warn: 0, fail: 0 };
   checks.forEach((c) => { if (counts[c.status] != null) counts[c.status] += 1; });
   const tone = gradeTone(diag.grade);
+  const prelaunch = manual || !!game.comingSoon || !(game.reviews && game.reviews.total != null);
 
   /* header */
   const url = steamUrl(game);
@@ -366,7 +372,9 @@ function renderReport() {
     game.developers && game.developers.length ? h('li', { text: game.developers.join(', ') }) : null,
     game.releaseDate ? h('li', { text: game.comingSoon ? `Releases ${game.releaseDate}` : `Released ${game.releaseDate}` }) : (game.comingSoon ? h('li', { text: 'Not released yet' }) : null),
     h('li', { text: price$(game) }),
-    game.reviews && game.reviews.total != null ? h('li', { text: `${fmtInt(game.reviews.total)} reviews${game.reviews.positivePct != null ? ` (${game.reviews.positivePct}% positive)` : ''}` }) : null);
+    game.reviews && game.reviews.total != null ? h('li', { text: `${fmtInt(game.reviews.total)} reviews${game.reviews.positivePct != null ? ` (${game.reviews.positivePct}% positive)` : ''}` }) : null,
+    prelaunch && game.followers != null ? h('li', { text: `${fmtInt(game.followers)} ${manual ? 'wishlists' : 'followers'}` }) : null,
+    prelaunch && game.followers == null && !(game.reviews && game.reviews.total != null) ? h('li', { text: 'Pre-launch: no reviews yet' }) : null);
   const priorities = checks.filter((c) => c.status !== 'pass').sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]).slice(0, 3);
   const head = h('section', { class: 'card', 'aria-label': 'Summary' },
     h('div', { class: 'report-head' },
@@ -454,12 +462,15 @@ const BENCH_DEFS = {
   ccu: { label: 'Peak concurrent players', mine: (g) => g.ccu },
 };
 function renderBenchmarks(game, diag) {
+  const pre = current.manual || !!game.comingSoon;
   const rows = [];
   for (const [key, raw] of Object.entries(diag.benchmarks || {})) {
     const median = raw && typeof raw === 'object' ? raw.median : raw;
     if (typeof median !== 'number' || Number.isNaN(median)) continue;
     const id = key.replace(/^median/i, '').toLowerCase();
-    const def = BENCH_DEFS[id] || { label: humanize(key.replace(/^median/i, '')), mine: () => null };
+    const def = { ...(BENCH_DEFS[id] || { label: humanize(key.replace(/^median/i, '')), mine: () => null }) };
+    if (pre && id === 'followers') def.label = 'Wishlists / followers';
+    if (pre && id === 'reviews') { def.label = 'Reviews (comparables, after launch)'; def.mine = () => null; }
     const fmt = def.fmt || ((v) => (Number.isInteger(v) ? fmtInt(v) : v.toFixed(1)));
     let mine = null;
     try { mine = def.mine(game); } catch { mine = null; }

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   GUIDE, WEIGHTS, rankCreators, draftPitch, draftFollowUp, countWords, placeholdersIn, STAGES, pipelineSummary,
   exportCsv, exportJson, importJson, csvCell, newEntry, setStage, markFollowedUp, sizeTierOf, normalizeLanguage,
-  formatCount, PITCH_WORD_LIMIT,
+  formatCount, PITCH_WORD_LIMIT, isPrelaunch,
 } from "../match.js";
 
 const NOW = Date.parse("2026-11-27T12:00:00Z");
@@ -214,7 +214,8 @@ test("helpers", () => {
 
 const BRACKET = /\[[^\]]+\]/g;
 const ALLOWED_PLACEHOLDERS = new Set(["[your name]", "[publisher]", "[launch date]", "[embargo date]", "[press kit link]",
-  "[Steam page link]", "[one-line hook: what makes it different]", "[Steam key]", "[genre]", "[game name]", "[similar game you covered]"]);
+  "[Steam page link]", "[one-line hook: what makes it different]", "[Steam key]", "[genre]", "[game name]", "[similar game you covered]",
+  "[release window]", "[embargo date, if any]", "[press kit or trailer link]", "[playtest key]", "[demo link]"]);
 
 function checkPitch(p) {
   assert.ok(p.subject && p.body);
@@ -234,17 +235,20 @@ test("pitches: short, specific, platform-specific, no stray tokens", () => {
       const p = draftPitch(r.creator, TARGET, { publisher: "Tiny Lantern", tone, matchedGames: r.matchedGames });
       checkPitch(p);
       assert.ok(p.body.includes(r.matchedGames[0].name), `mentions matched game:\n${p.body}`);
-      assert.match(p.body, /\[embargo date\]/);
-      assert.match(p.body, /\[press kit link\]/);
+      assert.equal(p.prelaunch, true, "no release date: treated as pre-launch");
+      assert.match(p.body, /\[release window\]/);
+      assert.match(p.body, /\[press kit or trailer link\]/);
+      assert.match(p.body, /wishlist/i);
       assert.match(p.body, /\?/, "has a question / ask");
       assert.deepEqual(p.placeholders, placeholdersIn(`${p.subject}\n${p.body}`));
     }
   }
   const yt = draftPitch(rs[0].creator, TARGET, { publisher: "Tiny Lantern", matchedGames: rs[0].matchedGames });
-  assert.match(yt.body, /Steam key/);
+  assert.match(yt.body, /Steam key for the preview build/);
   assert.match(yt.body, /Gloomcrawl made me rethink deckbuilders/, "references the video by title");
   assert.match(yt.body, /https:\/\/store\.steampowered\.com\/app\/999\//);
-  const cur = draftPitch(rs.find((x) => x.creator.id === "curator:42").creator, TARGET, { publisher: "Tiny Lantern" });
+  const cur = draftPitch(rs.find((x) => x.creator.id === "curator:42").creator, TARGET, { publisher: "Tiny Lantern", data: DATA, now: NOW });
+  assert.doesNotMatch(cur.body, /"Recommended"/, "generic curator titles aren't quoted");
   assert.match(cur.body, /Curator Connect/);
   assert.match(cur.body, /curator page/);
   assert.doesNotMatch(cur.body, /\[Steam key\]/);
@@ -258,6 +262,7 @@ test("pitch finds matches itself when given data; fills known values", () => {
   const p = draftPitch(dana, TARGET, { data: DATA, now: NOW, publisher: "Tiny Lantern", senderName: "Sam", launchDate: "March 3, 2027",
     embargoDate: "Feb 24, 2027", pressKitUrl: "https://tinylantern.games/press", steamKey: "AAAAA-BBBBB-CCCCC", hook: "A deckbuilder where cards burn." });
   checkPitch(p);
+  assert.equal(p.prelaunch, false, "launch date given and in the past? no: a string date in the future");
   assert.match(p.body, /Gloomcrawl/);
   assert.match(p.body, /AAAAA-BBBBB-CCCCC/);
   assert.match(p.body, /Feb 24, 2027/);
