@@ -1,7 +1,10 @@
-import { SOURCES, searchAll } from "./sources.js";
+import * as SRC from "./sources.js";
 import { demoPosts } from "./demo-data.js";
 import { analyze } from "./analysis.js";
 import { ARCHETYPES, GLOSSARY, LESSONS } from "./playbook.js";
+
+const { SOURCES, searchAll } = SRC;
+const KEY_GROUPS = SRC.KEY_GROUPS || {};
 
 /* ------------------------------------------------------------------ helpers */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -92,20 +95,32 @@ const state = {
   chart: null,
 };
 
-/* Stable color slot per source: fixed order, never cycled. */
-const colorOrder = SOURCES.map((s) => s.id);
+/* One fixed colour per platform id (never cycled, never by rank). The first eight take the
+   validated categorical slots in order; the rest use extra tones defined in styles.css.
+   Anything not listed is appended after the SOURCES list, so the platform list stays data-driven. */
+const PLATFORM_COLORS = ["youtube", "twitch", "reddit", "tiktok", "instagram", "x", "bluesky", "mastodon",
+  "facebook", "hackernews", "kick"];
+const colorOrder = [...new Set([...PLATFORM_COLORS, ...SOURCES.map((s) => s.id)])];
 function srcIndex(id) {
   let i = colorOrder.indexOf(id);
   if (i < 0) i = colorOrder.push(id) - 1;
   return i;
 }
-const srcColor = (id) => { const i = srcIndex(id); return i < 8 ? `var(--s${i + 1})` : "var(--s-other)"; };
+const srcColor = (id) => { const i = srcIndex(id); return i < 11 ? `var(--s${i + 1})` : "var(--s-other)"; };
 const srcName = (id) => SOURCES.find((s) => s.id === id)?.name || humanize(id);
 
+/* Sources that share a credential (e.g. Apify) point at a key group; keys live at keys[group || sourceId]. */
+const keyOwner = (src) => src.keyGroup || src.id;
+const keyFieldsOf = (src) => (src.keyGroup ? KEY_GROUPS[src.keyGroup]?.keyFields : src.keyFields) || [];
 function isRunnable(src) {
   if (!src.needsKey) return true;
-  const k = state.keys[src.id] || {};
-  return (src.keyFields || []).every((f) => f.optional || (k[f.name] && String(k[f.name]).trim()));
+  const k = state.keys[keyOwner(src)] || {};
+  return keyFieldsOf(src).every((f) => f.optional || (k[f.name] && String(k[f.name]).trim()));
+}
+function needKeyLabel(src) {
+  if (!src?.keyGroup) return "needs key";
+  const g = String(KEY_GROUPS[src.keyGroup]?.name || src.keyGroup).replace(/\s+(token|key)$/i, "");
+  return `needs ${g} token`;
 }
 
 /* ------------------------------------------------------------------ routing */
@@ -138,7 +153,7 @@ function renderChips() {
     const dot = el("span", { class: "dot", "aria-hidden": "true" });
     switch (status) {
       case "needkey":
-        return el("a", { class: "chip needkey", href: "#settings", role: "listitem", title: `${name} needs an API key. Open settings to add one.` }, dot, el("span", { text: name }), el("b", { text: "needs key" }));
+        return el("a", { class: "chip needkey", href: "#settings", role: "listitem", title: `${name} needs ${src?.keyGroup ? "a token" : "an API key"}. Open settings to add one.` }, dot, el("span", { text: name }), el("b", { text: needKeyLabel(src) }));
       case "loading":
         return el("span", { class: "chip loading", role: "listitem" }, dot, el("span", { text: name }), el("b", { text: "searching…" }));
       case "done":
@@ -304,7 +319,7 @@ function renderEmpty(errors) {
   ];
   const tips = [];
   if (!allFailed) tips.push("Check the spelling or try the full official title.", "Widen the time range to 90 days.");
-  if (needKey.length) tips.push(`Add API keys for ${needKey.map((s) => s.name).join(", ")} in Settings for far better coverage.`);
+  if (needKey.length) tips.push(`Add API keys or tokens for ${needKey.map((s) => s.name).join(", ")} in Settings for far better coverage.`);
   if (tips.length) kids.push(el("ul", {}, tips.map((t) => el("li", { text: t }))));
   if (errors.length) kids.push(el("ul", {}, errors.map((e) => el("li", { text: `${srcName(e.source)}: ${e.message}` }))));
   kids.push(el("button", { class: "btn primary", type: "button", text: "Try demo data", onclick: () => runSearch(true) }));
