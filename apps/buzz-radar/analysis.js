@@ -19,10 +19,12 @@
 //      >= 1.8x baseline, with 2+ extra posts).
 //   4. Clusters: TF-IDF vectors over title (x2), the start of the text, and tags, with
 //      stopwords, URLs and the game's own name removed, plus bigrams ("patch notes", "season 2").
-//      Two posts are neighbours when cosine * timeDecay >= 0.22 and they are within a time
+//      Two posts are neighbours when cosine * timeDecay >= 0.15 and they are within a time
 //      window (span/10, clamped to 12..72h). DBSCAN over that graph (minPts scales with
-//      sqrt(n), 3..8) finds dense groups; similar overlapping groups are merged, the largest 12
-//      are kept, and every other post goes to one "background chatter" cluster.
+//      sqrt(n), 3..8) with a density-contrast rule: a core post needs a good share of ALL its
+//      look-alikes inside its window, so steady recurring topics don't chain into one blob.
+//      Groups that overlap in time and topic are merged, the largest 12 are kept, groups with
+//      no influx character are folded into one "background chatter" cluster with the rest.
 //   5. Signals (0..1) per cluster, the campaign score (formula in campaignScore()), an
 //      archetype from transparent rules (archetypeFor()), reasons with numbers, top posts.
 //   6. Insights: 3-6 game-level takeaways.
@@ -127,7 +129,7 @@ game games gaming gamer gamers play played playing plays player players video vi
 subscribed subscribers like likes liked comment comments share watch watching watched new today first part episode ep
 full official link links description below check follow twitter instagram tiktok discord patreon merch social socials
 twitch youtube reddit bluesky mastodon stream streams streaming streamer live hd 4k 1080p 60fps pc ps5 xbox switch
-https http www com net org html`.split(/\s+/).filter(Boolean));
+https http www com net org html fyp foryou foryoupage trending xyzbca`.split(/\s+/).filter(Boolean));
 
 // Words that carry the disclosure itself; kept for similarity but never shown as cluster keywords.
 const KEYWORD_SKIP = new Set(["ad", "ads", "sponsored", "sponsor", "sponsoring", "sponsorship", "partner",
@@ -867,7 +869,7 @@ function analyzeCluster(id, members, ctx, isBackground) {
     const share = Math.round(eng.topShare * 100);
     const topWord = eng.k === 1 ? "post" : `${eng.k} posts`;
     if (signals.engagementSkew >= 0.45) {
-      R.push({ w: 3 + 7 * signals.engagementSkew, text: `One post dominates: ${quote(eng.top.displayTitle, 60)} by ${eng.top.author} holds ${share}% of the cluster’s engagement${eng.views ? ` (${fmtNum(eng.views)} views in total)` : ""}, the classic shape of organic virality.` });
+      R.push({ w: 3 + 7 * signals.engagementSkew, text: `One post dominates: ${quote(eng.top.displayTitle, 60)} by ${eng.top.author} holds ${share}% of the cluster’s engagement${eng.views ? ` (${fmtNum(eng.views)} views in total)` : ""}${archetype === "organic-viral" ? ", the classic shape of organic virality" : ", so reach came from one hit rather than many even placements"}.` });
     } else if (signals.engagementSkew <= 0.25 && n >= 5) {
       R.push({ w: paidish ? 7 : 3, text: `Engagement is spread evenly: the top ${topWord} hold${eng.k === 1 ? "s" : ""} only ${share}% of the total${eng.views ? ` (${fmtNum(eng.views)} views)` : ""}, typical of many similar-sized creators being booked at once.` });
     }
@@ -954,7 +956,8 @@ function buildInsights(clusters, bursts, posts, totals, ctx) {
   if (paid.length && organic.length) {
     const avg = (cs) => { const n = cs.reduce((s, c) => s + c._n, 0); return n ? cs.reduce((s, c) => s + c._views, 0) / n : 0; };
     const a = avg(paid), b = avg(organic);
-    if (a > 0 && b > 0) out.push(`Average views per post: ${fmtNum(a)} in likely-paid clusters vs ${fmtNum(b)} in organic ones — ${a >= b ? "the paid push bought reach" : "organic moments out-performed the paid push"}.`);
+    const verdict = a >= 1.3 * b ? "the paid push bought reach" : b >= 1.3 * a ? "organic moments out-performed the paid push" : "paid and organic content reached similar audiences per post";
+    if (a > 0 && b > 0) out.push(`Average views per post: ${fmtNum(a)} in likely-paid clusters vs ${fmtNum(b)} in organic ones — ${verdict}.`);
   }
   if (badDates) out.push(`${plural(badDates, "post")} had no readable date and ${badDates === 1 ? "was" : "were"} skipped.`);
   return out.slice(0, 6);
