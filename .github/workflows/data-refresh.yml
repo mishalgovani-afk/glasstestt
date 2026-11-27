@@ -9,7 +9,8 @@ on:
 
 permissions:
   contents: write
-  actions: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: data-refresh
@@ -45,6 +46,8 @@ jobs:
         run: |
           rm -rf _new && mkdir -p _new/creator-match && cp apps/creator-match/dist/data/creators.json _new/creator-match/
           NEW_DIR=_new .github/scripts/commit-data.sh "Data refresh: Creator Match"
-      - name: Republish site
-        if: always()
-        run: gh workflow run pages.yml --ref main -R "$GITHUB_REPOSITORY"
+
+  publish:
+    needs: refresh
+    if: always()
+    uses: ./.github/workflows/pages.yml
