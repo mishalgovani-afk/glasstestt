@@ -10,12 +10,13 @@
 //      (so the output never depends on input order).
 //   2. Timeline: fixed buckets (1h if the data spans <= 3 days, 6h <= 14 days, 24h otherwise,
 //      weekly past ~400 days) with counts, per-source counts and summed views.
-//   3. Bursts: robust baseline per bucket = 35th percentile of the buckets within +-14 days
-//      (excluding the bucket and its neighbours); spread = max(1.4826 * MAD of the quieter 60%,
-//      sqrt(baseline), 1)
-//      (the sqrt term is a Poisson floor). A bucket seeds a burst when z >= 2.5 with 3+ posts
-//      above baseline, or when it is >= 2.5x baseline with 8+ posts above it; the burst grows
-//      over adjacent buckets that are clearly elevated (z >= 1.5 or >= 1.8x baseline).
+//   3. Bursts: baseline per bucket = 35th percentile (bias-corrected toward the Poisson mean)
+//      of the buckets within +-14 days, excluding the bucket and its neighbours, so several
+//      spikes in one month can't raise each other's baseline. A bucket seeds a burst when its
+//      Poisson tail probability is < 0.001 with z >= 3 (spread = max(1.4826 * MAD of the
+//      quieter 60%, sqrt(baseline))) and 3+ extra posts, or when it is >= 2.5x baseline with
+//      8+ extra posts. The burst grows over adjacent buckets that are elevated (p < 0.05 or
+//      >= 1.8x baseline, with 2+ extra posts).
 //   4. Clusters: TF-IDF vectors over title (x2), the start of the text, and tags, with
 //      stopwords, URLs and the game's own name removed, plus bigrams ("patch notes", "season 2").
 //      Two posts are neighbours when cosine * timeDecay >= 0.22 and they are within a time
@@ -260,6 +261,25 @@ function quantile(sorted, q) {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
 }
 
+/** P(X >= c) for X ~ Poisson(lambda). */
+function poissonTail(c, lambda) {
+  if (c <= 0) return 1;
+  if (lambda > 200) {
+    const zz = (c - 0.5 - lambda) / Math.sqrt(lambda);
+    return 0.5 * erfc(zz / Math.SQRT2);
+  }
+  // P(X <= c-1), summed in a numerically safe way
+  let term = Math.exp(-lambda), cdf = term;
+  for (let k = 1; k < c; k++) { term *= lambda / k; cdf += term; if (term < 1e-300 && k > lambda) break; }
+  return Math.max(0, 1 - cdf);
+}
+
+function erfc(x) { // Abramowitz-Stegun 7.1.26
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-x * x);
+  return x >= 0 ? y : 2 - y;
+}
+
 function countBy(items, f) {
   const o = {};
   for (const it of items) { const k = f(it); o[k] = (o[k] || 0) + 1; }
@@ -395,24 +415,28 @@ function detectBursts(buckets, size, posts) {
   // two-bucket spike can't raise its own baseline. The 35th percentile (not the median) keeps
   // the baseline honest when a busy month has several spikes inside one window.
   const h = Math.max(4, Math.min(72, Math.round(336 / (size / HOUR))));
-  const base = new Array(n), z = new Array(n);
+  const base = new Array(n), z = new Array(n), pv = new Array(n);
   for (let i = 0; i < n; i++) {
     const win = [];
     for (let k = Math.max(0, i - h); k <= Math.min(n - 1, i + h); k++) if (Math.abs(k - i) > 1) win.push(counts[k]);
     const sorted = win.sort((a, b) => a - b);
-    const b = quantile(sorted, 0.35);
+    const q = quantile(sorted, 0.35);
+    // q35 of a Poisson(L) sits ~0.385*sqrt(L) below L: undo that bias.
+    const b = q + 0.385 * Math.sqrt(q);
     // spread from the quieter 60% of the window only, so other spikes don't inflate it
     const quiet = sorted.slice(0, Math.max(1, Math.ceil(sorted.length * 0.6)));
-    const mad = median(quiet.map((c) => Math.abs(c - b)));
+    const mad = median(quiet.map((c) => Math.abs(c - q)));
     const sigma = Math.max(1.4826 * mad, Math.sqrt(Math.max(b, 1)), 1);
     base[i] = b;
     z[i] = (counts[i] - b) / sigma;
+    pv[i] = poissonTail(counts[i], Math.max(b, 0.5));
   }
   const ratio = (i) => counts[i] / Math.max(base[i], 1);
   // A bucket is "hot" when clearly above baseline; a burst needs at least one seed bucket that is
-  // either statistically extreme or simply 2.5x the baseline with 8+ extra posts.
-  const hot = (i) => counts[i] > base[i] && counts[i] - base[i] >= 2 && (z[i] >= 1.5 || ratio(i) >= 1.8);
-  const seed = (i) => (z[i] >= 2.5 && counts[i] - base[i] >= 3) || (ratio(i) >= 2.5 && counts[i] - base[i] >= 8);
+  // either statistically extreme (Poisson tail p < 0.001 and z >= 3) or simply 2.5x the
+  // baseline with 8+ extra posts.
+  const hot = (i) => counts[i] - base[i] >= 2 && (pv[i] < 0.05 || ratio(i) >= 1.8);
+  const seed = (i) => (pv[i] < 0.001 && z[i] >= 3 && counts[i] - base[i] >= 3) || (ratio(i) >= 2.5 && counts[i] - base[i] >= 8);
   const bursts = [];
   let i = 0;
   while (i < n) {

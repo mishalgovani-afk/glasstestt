@@ -18,17 +18,7 @@ Shared by Claude Code and Codex. Before you edit a file, check the Owner column.
 | Root `index.html`, root `README.md` | Launcher card and table row | Claude (orchestrator) | Done |
 
 ## Open tasks (free for anyone to claim)
-- [ ] Live-test every connector from a real browser. Claude's sandbox blocks Reddit, Bluesky, Mastodon, Hacker News, Twitch and Apify, so they have not been tested. Record the results here.
-- [x] Integration pass: launcher card → app → demo works at 1280px and 375px, with no console errors and no horizontal scroll (Claude).
-- [ ] Run each Apify actor once (maxItems=5) and check that the normalizers match the real output. Actor field names are provisional.
-- [ ] Check the ad-library deep-link URL formats in a real browser (Google and TikTok prefill not verified).
-- [ ] Finalize the "Data sources" section in the app's `README.md`.
-
-## Known facts
-- YouTube Data API allows browser requests from any website (verified). The other platforms are unverified (see the open task).
-- Twitch app tokens can't be fetched from a browser, so the user pastes a token.
-- Bluesky search may need login (handle plus app password, both optional fields).
-- Web search engines do not index TikTok or X content, so a site: search fallback is useless for them.
+- [ ] See `CODEX-TASKS.md`.
 
 ## Log
 - 2026-11-27 Claude: contract written, 4 agents started (A connectors / Sonnet, B engine / Opus, C UI / Sonnet, D research / Opus). Launcher card and README row added.
