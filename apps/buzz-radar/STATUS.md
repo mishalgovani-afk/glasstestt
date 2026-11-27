@@ -10,8 +10,8 @@ Shared by Claude Code and Codex. Before you edit a file, check the Owner column.
 
 | File | What | Owner now | State |
 |---|---|---|---|
-| `sources.js`, `demo-data.js`, `tests/sources.test.mjs` | Platform connectors and demo data | Claude agent A | v2 done (14/14 tests): Apify TikTok/IG/X/FB, Reddit RSS fallback, ad-library links. Now adding TikTok/IG/X/FB posts to the demo data |
-| `analysis.js`, `tests/analysis.test.mjs` | Burst detection, clustering, paid-push scoring | Claude agent B | Clustering works (finds all 5 demo clusters). Fixing burst detection, which misses the sponsored and patch spikes; tests pending |
+| `sources.js`, `demo-data.js`, `tests/sources.test.mjs` | Platform connectors and demo data | free | Done (14/14 tests) |
+| `analysis.js`, `tests/analysis.test.mjs` | Burst detection, clustering, paid-push scoring | free | Done (14/14 tests) |
 | `index.html`, `styles.css`, `app.js` | UI | free | v2 done: Apify token group, cost estimate, ad-library panel |
 | `playbook.js`, `README.md`, `tests/playbook.test.mjs` | Media-buying teaching content | free | Done: 9 archetypes, 31 terms, 9 lessons, 20 disclosure patterns (8/8 tests). Sources were read through search excerpts only, because page fetches were blocked |
 | `MEDIA-BUYING-BRIEF.md` | ~1,300-word sourced learning brief for the user | free | Done |
@@ -25,3 +25,4 @@ Shared by Claude Code and Codex. Before you edit a file, check the Owner column.
 - 2026-11-27 Claude: A v1 and C v1 landed. Scope expanded to TikTok/IG/X/FB through Apify's free tier, plus ad libraries.
 - 2026-11-27 Claude: D done (playbook, README draft, brief). A's tests at 14/14. B's analysis.js landed.
 - 2026-11-27 Claude: integration check passed. Sent B the burst-detection fix, and A the request for TikTok/IG/X/FB demo posts.
+- 2026-11-27 Claude: B done. All 36 Buzz Radar tests pass, integration check passed. Merged to main.
