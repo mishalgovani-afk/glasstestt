@@ -22,7 +22,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 240
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -39,6 +39,9 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           # Pushes publish straight away with the saved data; only the daily/manual runs fetch fresh Steam data.
           SKIP_FETCH: ${{ github.event_name == 'push' && '1' || '' }}
+          PD_DEADLINE_MIN: "150"
+          CM_DEADLINE_MIN: "60"
+          CM_MAX_CURATORS: "600"
         run: |
           # Page Doctor first, so Creator Match can reuse its fresh Steam corpus.
           (cd apps/page-doctor && ./scripts/build.sh)

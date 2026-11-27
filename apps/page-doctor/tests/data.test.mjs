@@ -2,7 +2,7 @@
 // Run: node --test apps/page-doctor/tests/data.test.mjs   (Node 22, no network)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, cpSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, cpSync, existsSync, rmSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -293,7 +293,7 @@ test("build.sh keeps the snapshot and exits 0 when the network is unreachable", 
 });
 
 // ---------- end-to-end fetch against a mock Steam / SteamSpy / community server
-function mockServer() {
+function mockServer(cfg = {}) {
   const TAG_IDS = { 1716: "Roguelike", 97376: "Cozy" };
   const rowHtml = (id, name, date, rev, pct, tagIds) => `<a href="https://store.steampowered.com/app/${id}/x/" data-ds-appid="${id}" data-ds-tagids="[${tagIds}]" class="search_result_row ds_collapse_flag"><span class="title">${name}</span><div class="col search_released responsive_secondrow">${date}</div>${rev ? `<div class="col search_reviewscore"><span class="search_review_summary positive" data-tooltip-html="Very Positive&lt;br&gt;${pct}% of the ${rev.toLocaleString("en-US")} user reviews for this game are positive."></span></div>` : ""}</a>`;
   // app universe: id 2000000+n. n%5==0 old (2021), n%5==1..3 recent released with decreasing reviews, n%5==4 upcoming
@@ -337,7 +337,7 @@ function mockServer() {
       if (req2 === "appdetails") { const id = Number(u.searchParams.get("appid")); const i = info(id); return send({ appid: id, name: `Game ${id}`, positive: i?.rev ? Math.round(i.rev * 0.9) : 0, negative: i?.rev ? Math.round(i.rev * 0.1) : 0, owners: "20,000 .. 50,000", ccu: 10, tags: i?.upcoming ? [] : { [TAG_IDS[1716]]: 500, Indie: 400, Cozy: 100 } }); }
       return send({});
     }
-    if (u.pathname.startsWith("/games/")) return send(`<memberList><groupDetails><memberCount>1234</memberCount></groupDetails></memberList>`, "text/xml");
+    if (u.pathname.startsWith("/games/")) { if (cfg.community429) { res.writeHead(429); return res.end("slow down"); } return send(`<memberList><groupDetails><memberCount>1234</memberCount></groupDetails></memberList>`, "text/xml"); }
     if (u.pathname.startsWith("/app/")) return send(`InitAppTagModal( 1, [{"tagid":1716,"name":"Roguelike","count":50}], []);`, "text/html");
     res.writeHead(404); res.end("nope");
   });
@@ -398,4 +398,62 @@ test("fetch-steam.mjs fails cleanly (exit 1, no output files) when Steam is unre
     assert.equal(code, 1);
     assert.ok(!existsSync(join(dir, "o/corpus.json")));
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+function runFetch(args, env) {
+  return new Promise((resolve, reject) => {
+    let buf = "";
+    const p = spawn(process.execPath, [join(APP, "scripts/fetch-steam.mjs"), ...args], { env });
+    p.stdout.on("data", (d) => (buf += d)); p.stderr.on("data", (d) => (buf += d));
+    p.on("close", (code) => (code === 0 ? resolve(buf) : reject(new Error(`exit ${code}\n${buf}`))));
+  });
+}
+const mockEnv = (base) => ({ ...process.env, STEAM_STORE_BASE: base, STEAMSPY_BASE: base, STEAM_COMMUNITY_BASE: base, STEAM_DELAY_MS: "0", STEAMSPY_DELAY_MS: "0", STEAM_COMMUNITY_DELAY_MS: "0", HTTP_RETRIES: "0", MIN_APPID: "1000000" });
+
+test("a 429 from steamcommunity switches followers off at once and never stalls the run", async () => {
+  const { server } = mockServer({ community429: true });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "pd-429-"));
+  try {
+    const t = Date.now();
+    const log = await runFetch(["--out", join(dir, "o"), "--tags", "Roguelike", "--per-tag", "12", "--min-output", "5", "--no-catalog", "--watchlist", join(dir, "none.json")], { ...mockEnv(base), RATE_LIMIT_WAIT_MS: "45000", PD_DEADLINE_MIN: "8" });
+    assert.match(log, /deadline=8min/, "PD_DEADLINE_MIN is honoured");
+    assert.ok(Date.now() - t < 20000, "did not wait out any back-off");
+    assert.match(log, /followers disabled/);
+    const corpus = JSON.parse(readFileSync(join(dir, "o/corpus.json"), "utf8"));
+    assert.ok(corpus.games.length >= 10);
+    assert.ok(corpus.games.every((g) => g.followers === null));
+    assert.deepEqual(validateCorpus(corpus, { minGames: 5 }), []);
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("watchlist games are processed first and survive an already-expired deadline", async () => {
+  const { server } = mockServer();
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dir = mkdtempSync(join(tmpdir(), "pd-wl-"));
+  try {
+    const wl = join(dir, "wl.json");
+    writeFileSync(wl, JSON.stringify({ appids: [2000001, 2000002, 2000003] }));
+    const log = await runFetch(["--out", join(dir, "o"), "--tags", "Roguelike,Cozy", "--min-output", "1", "--watchlist", wl, "--deadline-min", "0.0001"], mockEnv(base));
+    assert.match(log, /watchlist: 3\/3 kept/);
+    const corpus = JSON.parse(readFileSync(join(dir, "o/corpus.json"), "utf8"));
+    assert.deepEqual(corpus.games.map((g) => g.appid).sort(), [2000001, 2000002, 2000003]);
+    assert.ok(corpus.games.every((g) => g.tags.length > 0 && g.reviews.total != null));
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Throttle: a pause only holds back its own host, and delay creeps back after good responses", async () => {
+  const { Throttle } = await import("../scripts/lib.mjs");
+  const a = new Throttle("a", 0), b = new Throttle("b", 0);
+  a.pause(300);
+  const t = Date.now();
+  await b.wait();
+  assert.ok(Date.now() - t < 100, "other host not delayed");
+  await a.wait();
+  assert.ok(Date.now() - t >= 250, "paused host waited");
+  a.delayMs = 1000; a.baseDelayMs = 100;
+  for (let i = 0; i < 30; i++) a.note(200, true);
+  assert.ok(a.delayMs < 1000 && a.delayMs >= 100);
 });

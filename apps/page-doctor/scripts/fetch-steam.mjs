@@ -21,7 +21,7 @@
 //
 // Options: --out DIR  --per-tag N (42: candidates per tag across hit/mid/upcoming)  --max-games N (1000)  --years N (3)  --deadline-min N (19)
 //          --max-pages N (3)  --catalog-size N (5000)  --no-catalog  --tags "Roguelike,Cozy"  --watchlist FILE  --min-output N (60)  --no-spy
-// Env: STEAM_STORE_BASE, STEAMSPY_BASE, STEAM_COMMUNITY_BASE (override hosts, used by tests), MIN_APPID, MID_MIN_REVIEWS (30), MID_MAX_REVIEWS (5000), STEAM_DELAY_MS (1100), STEAMSPY_DELAY_MS (1100),
+// Env: PD_DEADLINE_MIN (19: total run budget in minutes; build.sh's hard timeout is this + 5), PD_MAX_GAMES (1000), PD_CONCURRENCY (4), STEAM_STORE_BASE, STEAMSPY_BASE, STEAM_COMMUNITY_BASE (override hosts, used by tests), MIN_APPID, MID_MIN_REVIEWS (30), MID_MAX_REVIEWS (5000), STEAM_DELAY_MS (1100), STEAMSPY_DELAY_MS (1100),
 //      HTTP_RETRIES (3), RATE_LIMIT_WAIT_MS (45000), DEADLINE_MIN
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -103,9 +103,10 @@ export async function main(argv = process.argv.slice(2)) {
   const opts = {
     out: a.out || "dist/data",
     perTag: Number(a["per-tag"] ?? 42),
-    maxGames: Number(a["max-games"] ?? 1000),
+    maxGames: Number(a["max-games"] ?? numEnv("PD_MAX_GAMES", 1000)),
     years: Number(a.years ?? 3),
-    deadlineMin: Number(a["deadline-min"] ?? numEnv("DEADLINE_MIN", 19)),
+    deadlineMin: Number(a["deadline-min"] ?? numEnv("PD_DEADLINE_MIN", numEnv("DEADLINE_MIN", 19))),
+    concurrency: Math.max(1, Number(a.concurrency ?? numEnv("PD_CONCURRENCY", 4))),
     maxPages: Number(a["max-pages"] ?? 3),
     catalogSize: Number(a["catalog-size"] ?? 5000),
     noCatalog: !!a["no-catalog"],
@@ -124,6 +125,13 @@ export async function main(argv = process.argv.slice(2)) {
   const comT = new Throttle("steamcommunity", numEnv("STEAM_COMMUNITY_DELAY_MS", 1100));
   const quotas = bucketQuotas(opts.perTag);
   const now = new Date();
+  // shared run state (filled during discovery / details)
+  const rowOf = new Map();
+  const foundUnder = new Map(); // appid -> Set(tag name)
+  const idToName = new Map(); // steam tag id -> tag name
+  const games = [];
+  const skips = { notGame: 0, notRecent: 0, comingSoon: 0, noStore: 0, error: 0, invalid: 0 };
+  let spyDead = !!opts.noSpy, spyFails = 0, comDead = false, comFails = 0, storePageFetches = 0, reviewApiCalls = 0, processed = 0;
 
   log(`Page Doctor fetch: out=${opts.out} perTag=${opts.perTag} maxGames=${opts.maxGames} years=${opts.years} deadline=${opts.deadlineMin}min`);
   log(`hosts: store=${storeBase()} steamspy=${spyBase()}`);
@@ -154,6 +162,90 @@ export async function main(argv = process.argv.slice(2)) {
   });
   const tagNames = tagDefs.map((t) => t.name);
   const tagNormToName = new Map(tagDefs.flatMap((t) => [t.name, ...(t.aliases || [])].map((n) => [norm(n), t.name])));
+  for (const t of TAGS) idToName.set(t.id, t.name);
+  for (const [n, id] of Object.entries(live)) idToName.set(id, n);
+  const watchSet = new Set(watch);
+
+  // ---- per-game details (used for the watchlist first, then for tag candidates); several games in flight at once,
+  // each host has its own rate limit (Throttle), and a host's back-off only pauses that host.
+  const cap = opts.maxGames;
+  async function processItem(item) {
+    const wantsUpcoming = (item.memberships || []).some((m) => m.bucket === "upcoming");
+    processed++;
+    try {
+      const [store, spy, followers] = await Promise.all([
+        fetchStore(item, steam),
+        spyDead ? null : fetchSpy(item.appid, spyT).then((r) => { spyFails = 0; return r; }, (e) => {
+          if (++spyFails >= 8 && !spyDead) { spyDead = true; warn(`SteamSpy failed ${spyFails} times in a row (${e.message}); disabling it for this run`); }
+          return null;
+        }),
+        comDead ? null : fetchFollowers(item.appid, comT).then((r) => { comFails = 0; return r; }, (e) => {
+          // never stall on this host: a 429/403 switches followers off for the whole run at once
+          if (!comDead && (/HTTP (429|403)/.test(e.message) || ++comFails >= 8)) { comDead = true; warn(`Steam community unavailable (${e.message}); followers disabled for this run`); }
+          return null;
+        }),
+      ]);
+      if (!store) { skips.noStore++; return; }
+      if (!item.watch) {
+        if (store.comingSoon && !wantsUpcoming) { skips.comingSoon++; return; }
+        if (!store.comingSoon && !isRecent(store.releaseIso, opts.years, now)) { skips.notRecent++; return; }
+      }
+      let reviews = null;
+      const row = rowOf.get(item.appid) || item.row || null;
+      const haveNumbers = (row && row.reviewTotal != null) || (spy && spy.totalReviews != null);
+      if ((item.watch || !haveNumbers) && !store.comingSoon) {
+        try {
+          reviews = parseAppReviews(await getJson(`${storeBase()}/appreviews/${item.appid}?json=1&num_per_page=0&purchase_type=all&language=all`, steam));
+          reviewApiCalls++;
+        } catch (e) { warn(`appreviews ${item.appid}: ${e.message}`); }
+      }
+      // tags: SteamSpy votes first. Without them use the tag ids on the search row, and only then (rarely) the store page.
+      const rowTagNames = (row?.tagIds || []).map((id) => idToName.get(id)).filter(Boolean);
+      const hasSpyTags = !!(spy && spy.tags.length);
+      let storeTags = [];
+      if (!hasSpyTags && (spyDead || item.watch || rowTagNames.length < 4) && storePageFetches < 200) {
+        try {
+          storePageFetches++;
+          const { text } = await getText(`${storeBase()}/app/${item.appid}/?l=english&cc=us`, steam, { headers: { Cookie: "birthtime=568022401; lastagecheckage=1-0-1988; wants_mature_content=1" } });
+          storeTags = parseStorePageTags(text);
+        } catch (e) { warn(`store page tags ${item.appid}: ${e.message}`); }
+      }
+      const fallbackTags = [...new Set([...rowTagNames, ...(item.memberships || []).map((m) => m.tag)])];
+      const game = buildGame({ store, spy, row, reviews, storeTags, fallbackTags, followers });
+      game.aboutText = game.aboutText.slice(0, 5000);
+      game.screenshots = game.screenshots.filter((u) => u.startsWith("https://"));
+      const bad = validateCorpus({ generatedAt: now.toISOString(), source: "live", games: [game], tagIndex: {} });
+      if (bad.length) { skips.invalid++; warn(`dropping ${item.appid} (${game.name}): ${bad[0]}`); return; }
+      games.push(game);
+      const tagsOf = foundUnder.get(item.appid) || new Set();
+      for (const m of item.memberships || []) tagsOf.add(m.tag);
+      foundUnder.set(item.appid, tagsOf);
+    } catch (e) {
+      skips.error++;
+      warn(`game ${item.appid} failed: ${e.message}`);
+    }
+    if (processed % 25 === 0) log(`progress: ${processed} processed, ${games.length} kept, ${Math.round((Date.now() - t0) / 1000)}s elapsed`);
+  }
+  async function runPool(items, { ignoreDeadline = false } = {}) {
+    let idx = 0, warned = false;
+    await Promise.all(Array.from({ length: opts.concurrency }, async () => {
+      while (idx < items.length) {
+        if (ignoreDeadline ? stopRequested : outOfTime()) {
+          if (!warned) { warned = true; warn(`stopping details: ${stopRequested ? "signal" : "deadline"} reached after ${processed} games processed (${items.length - idx} candidates left)`); }
+          return;
+        }
+        const item = items[idx++];
+        if (!item.watch && games.length >= cap) continue;
+        await processItem(item);
+      }
+    }));
+  }
+
+  // ---- phase 0: the watchlist goes first and ignores the deadline, so it is never cut off
+  if (watch.length) {
+    await runPool(watch.map((id) => ({ appid: id, watch: true, memberships: [] })), { ignoreDeadline: true });
+    log(`watchlist: ${games.filter((g) => watchSet.has(g.appid)).length}/${watch.length} kept`);
+  }
 
   // ---- phase 1: discovery per tag (hit / mid / upcoming buckets)
   const perTag = new Map(); // tag -> { hit:[], mid:[], upcoming:[] } of {appid,name,row}
@@ -176,18 +268,15 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   // ---- phase 2: interleave candidates round-robin (tag x bucket) so every tag and bucket is covered if time runs short
-  const foundUnder = new Map(); // appid -> Set(tag) for accepted games
-  const gameBucket = new Map();
   const queue = [];
   const byApp = new Map();
-  const rowOf = new Map();
-  for (const id of watch) { const it = { appid: id, watch: true, memberships: [] }; byApp.set(id, it); queue.push(it); }
   const maxRank = Math.max(quotas.hit, quotas.mid, quotas.upcoming) * 2 + 4;
   for (let rank = 0; rank < maxRank; rank++) {
     for (const bucket of BUCKETS) {
       for (const [tag, lists] of perTag) {
         const c = lists[bucket][rank];
         if (!c) continue;
+        if (watchSet.has(c.appid)) { const t = foundUnder.get(c.appid) || new Set(); t.add(tag); foundUnder.set(c.appid, t); continue; } // already done in phase 0
         let it = byApp.get(c.appid);
         if (!it) { it = { appid: c.appid, name: c.name, row: c.row, memberships: [] }; byApp.set(c.appid, it); queue.push(it); }
         it.memberships.push({ tag, bucket });
@@ -195,7 +284,6 @@ export async function main(argv = process.argv.slice(2)) {
       }
     }
   }
-  const cap = opts.maxGames;
   log(`candidate queue: ${queue.length} unique games (watchlist ${watch.length}); candidate targets per tag ${JSON.stringify(quotas)}; processing up to ${cap}`);
 
   // ---- catalog (appid + name of ~5,000 top Steam games, so the UI can find almost anything)
@@ -207,68 +295,8 @@ export async function main(argv = process.argv.slice(2)) {
     } catch (e) { warn(`catalog failed: ${e.message}`); }
   }
 
-  // ---- phase 3: details
-  const games = [];
-  const skips = { notGame: 0, notRecent: 0, comingSoon: 0, noStore: 0, error: 0, invalid: 0 };
-  let spyDead = opts.noSpy, spyFails = 0, comDead = false, comFails = 0, storePageFetches = 0, reviewApiCalls = 0, processed = 0;
-  const wlSet = new Set(watch);
-  for (const item of queue) {
-    if (outOfTime()) { warn(`stopping details: ${stopRequested ? "signal" : "deadline"} reached after ${processed}/${queue.length} candidates`); break; }
-    if (!item.watch && games.length >= cap) continue;
-    const wantsUpcoming = item.memberships.some((m) => m.bucket === "upcoming");
-    processed++;
-    try {
-      const [store, spy, followers] = await Promise.all([
-        fetchStore(item, steam),
-        spyDead ? null : fetchSpy(item.appid, spyT).then((r) => { spyFails = 0; return r; }, (e) => {
-          if (++spyFails >= 8 && !spyDead) { spyDead = true; warn(`SteamSpy failed ${spyFails} times in a row (${e.message}); disabling it for this run`); }
-          return null;
-        }),
-        comDead ? null : fetchFollowers(item.appid, comT).then((r) => { comFails = 0; return r; }, (e) => {
-          if (++comFails >= 8 && !comDead) { comDead = true; warn(`Steam community failed ${comFails} times in a row (${e.message}); followers disabled for this run`); }
-          return null;
-        }),
-      ]);
-      if (!store) { skips.noStore++; continue; }
-      if (!item.watch) {
-        if (store.comingSoon && !wantsUpcoming) { skips.comingSoon++; continue; }
-        if (!store.comingSoon && !isRecent(store.releaseIso, opts.years, now)) { skips.notRecent++; continue; }
-      }
-      let reviews = null;
-      const row = rowOf.get(item.appid) || item.row || null;
-      const haveNumbers = (row && row.reviewTotal != null) || (spy && spy.totalReviews != null);
-      if ((item.watch || !haveNumbers) && !store.comingSoon) {
-        try {
-          reviews = parseAppReviews(await getJson(`${storeBase()}/appreviews/${item.appid}?json=1&num_per_page=0&purchase_type=all&language=all`, steam));
-          reviewApiCalls++;
-        } catch (e) { warn(`appreviews ${item.appid}: ${e.message}`); }
-      }
-      let storeTags = [];
-      if ((!spy || !spy.tags.length) && (spyDead || item.watch || store.comingSoon) && storePageFetches < 300) {
-        try {
-          storePageFetches++;
-          const { text } = await getText(`${storeBase()}/app/${item.appid}/?l=english&cc=us`, steam, { headers: { Cookie: "birthtime=568022401; lastagecheckage=1-0-1988; wants_mature_content=1" } });
-          storeTags = parseStorePageTags(text);
-        } catch (e) { warn(`store page tags ${item.appid}: ${e.message}`); }
-      }
-      const fallbackTags = [...new Set(item.memberships.map((m) => m.tag))];
-      const game = buildGame({ store, spy, row, reviews, storeTags, fallbackTags, followers });
-      game.aboutText = game.aboutText.slice(0, 5000);
-      game.screenshots = game.screenshots.filter((u) => u.startsWith("https://"));
-      const bad = validateCorpus({ generatedAt: now.toISOString(), source: "live", games: [game], tagIndex: {} });
-      if (bad.length) { skips.invalid++; warn(`dropping ${item.appid} (${game.name}): ${bad[0]}`); continue; }
-      games.push(game);
-      gameBucket.set(item.appid, item.memberships.map((m) => m.bucket));
-      foundUnder.set(item.appid, new Set(item.memberships.map((m) => m.tag)));
-    } catch (e) {
-      skips.error++;
-      warn(`game ${item.appid} failed: ${e.message}`);
-    }
-    if (processed % 25 === 0) {
-      const el = (Date.now() - t0) / 1000;
-      log(`progress: ${processed}/${queue.length} processed, ${games.length} kept, ${Math.round(el)}s elapsed`);
-    }
-  }
+  // ---- phase 3: details for tag candidates (deadline applies)
+  await runPool(queue);
 
   // ---- tagIndex
   const tagIndex = {};
@@ -295,6 +323,7 @@ export async function main(argv = process.argv.slice(2)) {
   // ---- summary
   log("---- summary ----");
   log(`games kept: ${games.length} (of ${processed} processed, ${queue.length} queued); skips ${JSON.stringify(skips)}`);
+  log(`watchlist: ${games.filter((g) => watchSet.has(g.appid)).length}/${watch.length} kept`);
   log(`appreviews calls: ${reviewApiCalls}; store-page tag fetches: ${storePageFetches}; steamspy ${spyDead ? "DISABLED" : "ok"}`);
   for (const t of tagNames) log(`  tag ${t.padEnd(26)} ${String((tagIndex[t] || []).length).padStart(3)} in index (candidates: hit ${perTag.get(t)?.hit.length ?? 0}, mid ${perTag.get(t)?.mid.length ?? 0}, upcoming ${perTag.get(t)?.upcoming.length ?? 0})`);
   log(`mix: ${games.filter((g) => g.comingSoon).length} upcoming, ${games.filter((g) => !g.comingSoon && (g.reviews.total ?? 0) > 5000).length} hits (>5000 reviews), ${games.filter((g) => !g.comingSoon && (g.reviews.total ?? 0) <= 5000).length} mid/small; followers known for ${games.filter((g) => g.followers != null).length}`);
@@ -438,7 +467,7 @@ export async function fetchCatalog(opts, steam, outOfTime, until) {
 }
 
 async function fetchFollowers(appid, comT) {
-  const { status, text } = await getText(`${communityBase()}/games/${appid}/memberslistxml/?xml=1`, comT, { retries: 1 });
+  const { status, text } = await getText(`${communityBase()}/games/${appid}/memberslistxml/?xml=1`, comT, { retries: 0 });
   if (status >= 400) throw new Error(`HTTP ${status}`);
   return parseMemberCount(text);
 }

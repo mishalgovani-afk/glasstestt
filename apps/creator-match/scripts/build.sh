@@ -2,6 +2,7 @@
 # Builds apps/creator-match/dist/: static files + data snapshot, then tries to refresh data/ from Steam curators and YouTube.
 # Optional env: YOUTUBE_API_KEY (more channels + subscriber counts), CORPUS_PATH (Page Doctor corpus; build page-doctor first so ../page-doctor/dist/data/corpus.json exists).
 # The build NEVER fails because of the network: if the fetch fails or times out, the committed snapshot stays.
+#   CM_DEADLINE_MIN=<minutes> sets the fetch time budget (default 20); the hard timeout is that + 5.
 #   SKIP_FETCH=1 ./scripts/build.sh      skip the network step (used by tests and offline builds)
 #   REUSE_FETCHED=1 ./scripts/build.sh   if dist/data/creators.json already holds LIVE data from an earlier run, keep it and skip the fetch
 #                                        (lets a workflow fetch once, then run scripts/build-site.sh without fetching again)
@@ -34,8 +35,11 @@ if [ -n "${SKIP_FETCH:-}" ]; then
   exit 0
 fi
 
+# The fetcher stops itself after CM_DEADLINE_MIN minutes (default 20); the hard timeout is that plus 5 minutes.
+deadline_min="${CM_DEADLINE_MIN:-20}"
+hard_timeout_s=$(awk -v m="$deadline_min" 'BEGIN { printf "%d", (m + 5) * 60 }')
 run_with_timeout() {
-  if command -v timeout >/dev/null 2>&1; then timeout 1500 "$@"; else "$@"; fi
+  if command -v timeout >/dev/null 2>&1; then timeout "$hard_timeout_s" "$@"; else "$@"; fi
 }
 
 if run_with_timeout node scripts/fetch-creators.mjs --out dist/data; then

@@ -40,6 +40,8 @@ export class Throttle {
   constructor(name, delayMs) {
     this.name = name;
     this.delayMs = delayMs;
+    this.baseDelayMs = delayMs;
+    this.okStreak = 0;
     this.next = 0;
     this.stats = { requests: 0, ok: 0, failed: 0, statuses: {} };
   }
@@ -49,10 +51,17 @@ export class Throttle {
     this.next = at + this.delayMs;
     if (at > now) await sleep(at - now);
   }
+  /** Hold back every request to THIS host for ms (other hosts are unaffected). */
+  pause(ms) {
+    this.next = Math.max(this.next, Date.now() + ms);
+  }
   note(status, ok) {
     this.stats.requests++;
-    if (ok) this.stats.ok++;
-    else this.stats.failed++;
+    if (ok) {
+      this.stats.ok++;
+      // after a run of good responses, creep back toward the configured delay
+      if (++this.okStreak >= 30 && this.delayMs > this.baseDelayMs) { this.delayMs = Math.max(this.baseDelayMs, Math.round(this.delayMs * 0.85)); this.okStreak = 0; }
+    } else { this.stats.failed++; this.okStreak = 0; }
     const k = String(status);
     this.stats.statuses[k] = (this.stats.statuses[k] || 0) + 1;
   }
@@ -86,8 +95,8 @@ export async function getText(url, throttle, opts = {}) {
         throttle.delayMs = Math.min(Math.round(throttle.delayMs * 1.5) + 100, 6000);
         lastErr = new Error(`HTTP ${res.status} (rate limited) for ${url}`);
         if (attempt < retries) {
-          warn(`${throttle.name}: ${res.status}, waiting ${Math.round(rateLimitWaitMs / 1000)}s, delay now ${throttle.delayMs}ms`);
-          await sleep(rateLimitWaitMs);
+          warn(`${throttle.name}: ${res.status}, pausing this host ${Math.round(rateLimitWaitMs / 1000)}s, delay now ${throttle.delayMs}ms`);
+          throttle.pause(rateLimitWaitMs); // the pause is per host; the next wait() sleeps it off
           continue;
         }
         throw lastErr;

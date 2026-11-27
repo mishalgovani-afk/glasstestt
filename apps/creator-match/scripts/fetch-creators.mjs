@@ -18,13 +18,13 @@
 // committed snapshot if it is live data), else a small list from SteamSpy/Steam search. No imports from other apps.
 //
 // Options: --out DIR  --corpus FILE  --max-curators N (250 crawled in depth)  --directory-pages N (10)  --deadline-min N (20)
-//          --yt-games N (40, with API key)  --max-yt-channels N (150)  --max-spy N (350)  --min-output N (20)  --no-youtube
-// Env: YOUTUBE_API_KEY (optional), STEAM_STORE_BASE, STEAMSPY_BASE, YOUTUBE_BASE, YOUTUBE_API_BASE, STEAM_DELAY_MS (1100),
+//          --yt-games N (40, with API key)  --max-yt-channels N (150)  --max-spy N (2000: games whose tags are looked up on SteamSpy, most-covered first)  --min-output N (20)  --no-youtube
+// Env: CM_DEADLINE_MIN (20: total run budget in minutes; build.sh hard timeout is this + 5), CM_MAX_SPY (2000), CM_MAX_CURATORS (250), YOUTUBE_API_KEY (optional), STEAM_STORE_BASE, STEAMSPY_BASE, YOUTUBE_BASE, YOUTUBE_API_BASE, STEAM_DELAY_MS (1100),
 //      STEAMSPY_DELAY_MS (1100), YOUTUBE_DELAY_MS (1100), HTTP_RETRIES (3), RATE_LIMIT_WAIT_MS (45000), DEADLINE_MIN
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
-import { parseArgs, numEnv, Throttle, getJson, getText, writeJsonAtomic, log, warn } from "./lib.mjs";
+import { parseArgs, numEnv, sleep, Throttle, getJson, getText, writeJsonAtomic, log, warn } from "./lib.mjs";
 import {
   parseCuratorDirectory, parseRecommendations, parseCuratorPage, linksFromText, parseYouTubeUrl, parseChannelIdFromHtml,
   parseYouTubeFeed, uploadsPerMonth, averageViews, parseYtSearch, parseYtChannels, parseYtVideos, buildGameIndex,
@@ -45,12 +45,12 @@ export async function main(argv = process.argv.slice(2)) {
   const opts = {
     out: a.out || "dist/data",
     corpus: a.corpus || process.env.CORPUS_PATH || null,
-    maxCurators: Number(a["max-curators"] ?? 250),
+    maxCurators: Number(a["max-curators"] ?? numEnv("CM_MAX_CURATORS", 250)),
     directoryPages: Number(a["directory-pages"] ?? 10),
-    deadlineMin: Number(a["deadline-min"] ?? numEnv("DEADLINE_MIN", 20)),
+    deadlineMin: Number(a["deadline-min"] ?? numEnv("CM_DEADLINE_MIN", numEnv("DEADLINE_MIN", 20))),
     ytGames: Number(a["yt-games"] ?? 40),
     maxYtChannels: Number(a["max-yt-channels"] ?? 150),
-    maxSpy: Number(a["max-spy"] ?? 350),
+    maxSpy: Number(a["max-spy"] ?? numEnv("CM_MAX_SPY", 2000)),
     minOutput: Number(a["min-output"] ?? 20),
     noYoutube: !!a["no-youtube"],
   };
@@ -99,6 +99,34 @@ export async function main(argv = process.argv.slice(2)) {
   log(`crawling ${selected.length} curators in depth (${selected.filter((c) => c.recent.some((r) => corpusIds.has(r.appid))).length} already overlap the game list)`);
   const creators = new Map();
   const ytLinks = new Map(); // key -> {url, curatorName}
+  // SteamSpy tag lookups run in the background WHILE the curators are crawled (different host, own rate limit).
+  // Games covered by the most creators are looked up first; the worker keeps going until the time window closes.
+  const coverCount = new Map();
+  const bump = (appid) => coverCount.set(appid, (coverCount.get(appid) || 0) + 1);
+  for (const c of selected) for (const r of c.recent) if (r.appid && r.verdict !== "not_recommended") bump(r.appid); // early priorities from the directory
+  const spyTried = new Set();
+  let workDone = false, spyOk = 0, spyFailsRow = 0;
+  const spyWorker = async () => {
+    while (!before(0.9) && spyFailsRow < 8 && spyTried.size < opts.maxSpy) {
+      let best = null, bestCount = 0;
+      for (const [id, n] of coverCount) if (n > bestCount && !spyTried.has(id) && !(gameInfo.get(id)?.tags?.length)) { best = id; bestCount = n; }
+      if (best == null) { if (workDone) break; await sleep(300); continue; }
+      spyTried.add(best);
+      try {
+        const sp = await getJson(`${spyBase()}/api.php?request=appdetails&appid=${best}`, spyT);
+        const tags = sp?.tags && !Array.isArray(sp.tags) ? Object.entries(sp.tags).sort((x, y) => y[1] - x[1]).map(([n]) => n).slice(0, 12) : [];
+        const g = gameInfo.get(best) || { appid: best, name: sp?.name || `App ${best}` };
+        g.tags = tags;
+        if (sp?.name && /^App \d+$/.test(g.name)) g.name = sp.name;
+        if (Number.isFinite(Number(sp?.positive)) && Number.isFinite(Number(sp?.negative))) g.reviewsTotal = Number(sp.positive) + Number(sp.negative);
+        gameInfo.set(best, g);
+        spyFailsRow = 0; spyOk++;
+      } catch (e) { spyFailsRow++; if (spyFailsRow <= 3) warn(`steamspy ${best}: ${e.message}`); if (spyFailsRow >= 8) warn("SteamSpy keeps failing; no more tag lookups"); }
+      if (spyTried.size % 200 === 0) log(`steamspy: ${spyTried.size} looked up, ${spyOk} with data, ${Math.round((Date.now() - t0) / 1000)}s`);
+    }
+    log(`steamspy: finished, ${spyOk} lookups succeeded of ${spyTried.size} tried (limit ${opts.maxSpy})`);
+  };
+  const spyJob = spyWorker().catch((e) => warn("steamspy worker: " + e.message));
   let crawled = 0, crawlFail = 0;
   for (const c of selected) {
     if (before(0.55)) { warn(`curator crawl stopped after ${crawled}/${selected.length}: time window used`); break; }
@@ -110,6 +138,7 @@ export async function main(argv = process.argv.slice(2)) {
       crawled++;
       if (!cr) continue;
       creators.set(cr.id, cr);
+      for (const g of cr.coveredGames) if (g.appid != null) bump(g.appid);
       for (const l of cr.links) if (parseYouTubeUrl(l.url)) ytLinks.set(l.url, { url: l.url, from: cr.name });
       for (const r of recs) if (r.appid && !gameInfo.has(r.appid)) gameInfo.set(r.appid, { appid: r.appid, name: r.name || `App ${r.appid}`, tags: [] });
     } catch (e) {
@@ -120,8 +149,9 @@ export async function main(argv = process.argv.slice(2)) {
     if (crawled && crawled % 25 === 0) log(`curators crawled: ${crawled}/${selected.length}, creators kept ${creators.size}, ${Math.round((Date.now() - t0) / 1000)}s`);
   }
   log(`curators crawled: ${crawled}, creators kept: ${creators.size}, youtube links found: ${ytLinks.size}`);
+  // (the spy worker keeps running; it also picks up games matched through YouTube titles below)
 
-  // ---- 4. YouTube (links from curators, optional API) + SteamSpy tags, concurrently (different hosts)
+  // ---- 4. YouTube (links from curators, optional API); SteamSpy lookups continue in the background
   const ytCreators = new Map();
   const ytPhase = async () => {
     if (opts.noYoutube) return;
@@ -162,6 +192,7 @@ export async function main(argv = process.argv.slice(2)) {
         const apiCovered = ch.videos.map((v) => ({ appid: v.appid, name: gameInfo.get(v.appid)?.name || v.gameName, url: `https://www.youtube.com/watch?v=${v.videoId}`, date: v.published, title: v.title, views: v.views ?? null }));
         const all = dedupeCovered([...apiCovered, ...covered]);
         if (!all.length) continue;
+        for (const g of all) if (g.appid != null) bump(g.appid);
         ytCreators.set(`youtube:${ch.id}`, {
           id: `youtube:${ch.id}`, platform: "youtube", name: ch.name || feed.title || ch.id, url: `https://www.youtube.com/channel/${ch.id}`,
           avatar: ch.avatar, followers: ch.subs, language: ch.language, lastActive: newest(feed.entries.map((e) => e.published)),
@@ -172,45 +203,10 @@ export async function main(argv = process.argv.slice(2)) {
     }
     log(`youtube: ${ok} feeds read, ${ytCreators.size} channels cover known games`);
   };
-  const spyPhase = async () => {
-    // tags for covered games that are not known yet, most-covered first
-    const counts = new Map();
-    for (const cr of creators.values()) for (const g of cr.coveredGames) if (g.appid != null) counts.set(g.appid, (counts.get(g.appid) || 0) + 1);
-    const todo = [...counts.entries()].filter(([id]) => !(gameInfo.get(id)?.tags?.length)).sort((x, y) => y[1] - x[1]).slice(0, opts.maxSpy).map(([id]) => id);
-    log(`steamspy: looking up tags for ${todo.length} covered games`);
-    let fails = 0, done = 0;
-    for (const id of todo) {
-      if (before(0.9) || fails >= 8) { if (fails >= 8) warn("SteamSpy keeps failing; skipping the rest"); break; }
-      try {
-        const s = await getJson(`${spyBase()}/api.php?request=appdetails&appid=${id}`, spyT);
-        const tags = s?.tags && !Array.isArray(s.tags) ? Object.entries(s.tags).sort((x, y) => y[1] - x[1]).map(([n]) => n).slice(0, 12) : [];
-        const g = gameInfo.get(id) || { appid: id, name: s?.name || `App ${id}` };
-        g.tags = tags;
-        if (s?.name && /^App \d+$/.test(g.name)) g.name = s.name;
-        if (Number.isFinite(Number(s?.positive)) && Number.isFinite(Number(s?.negative))) g.reviewsTotal = Number(s.positive) + Number(s.negative);
-        gameInfo.set(id, g);
-        fails = 0; done++;
-      } catch (e) { fails++; if (fails <= 3) warn(`steamspy ${id}: ${e.message}`); }
-    }
-    log(`steamspy: tags found for ${done}/${todo.length} games`);
-  };
-  await Promise.all([ytPhase().catch((e) => warn("youtube phase: " + e.message)), spyPhase().catch((e) => warn("steamspy phase: " + e.message))]);
+  await ytPhase().catch((e) => warn("youtube phase: " + e.message));
   for (const [id, cr] of ytCreators) creators.set(id, cr);
-  // second tag pass for games only matched through YouTube titles
-  {
-    const need = [];
-    for (const cr of ytCreators.values()) for (const g of cr.coveredGames) if (g.appid != null && !(gameInfo.get(g.appid)?.tags?.length) && !need.includes(g.appid)) need.push(g.appid);
-    let fails = 0;
-    for (const id of need.slice(0, 80)) {
-      if (before(0.95) || fails >= 5) break;
-      try {
-        const s = await getJson(`${spyBase()}/api.php?request=appdetails&appid=${id}`, spyT);
-        const g = gameInfo.get(id) || { appid: id, name: s?.name || `App ${id}` };
-        g.tags = s?.tags && !Array.isArray(s.tags) ? Object.entries(s.tags).sort((x, y) => y[1] - x[1]).map(([n]) => n).slice(0, 12) : [];
-        gameInfo.set(id, g);
-      } catch { fails++; }
-    }
-  }
+  workDone = true;
+  await spyJob;
 
   // ---- 5. assemble
   const gamesByAppid = new Map([...gameInfo.entries()].map(([id, g]) => [id, { tags: g.tags || [] }]));
@@ -241,7 +237,7 @@ export async function main(argv = process.argv.slice(2)) {
   const byPlat = {};
   for (const c of out) byPlat[c.platform] = (byPlat[c.platform] || 0) + 1;
   log("---- summary ----");
-  log(`creators: ${out.length} ${JSON.stringify(byPlat)}; games referenced: ${gamesOut.length} (with tags: ${gamesOut.filter((g) => g.tags.length).length})`);
+  log(`creators: ${out.length} ${JSON.stringify(byPlat)}; games referenced: ${gamesOut.length} (with tags: ${gamesOut.filter((g) => g.tags.length).length}, SteamSpy lookups ${spyOk}/${spyTried.size})`);
   log(`followers known for ${out.filter((c) => c.followers != null).length}; with other links: ${out.filter((c) => c.links.length > 1).length}; active in last 90 days: ${out.filter((c) => c.lastActive && now - Date.parse(c.lastActive) < 90 * DAY).length}`);
   log(store.summary()); log(spyT.summary()); log(ytT.summary()); if (apiKey) log(apiT.summary());
   const errs = validateCreators(result, { minCreators: opts.minOutput });

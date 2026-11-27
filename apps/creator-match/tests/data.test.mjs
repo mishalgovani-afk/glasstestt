@@ -352,10 +352,13 @@ test("fetch-creators.mjs end to end against a mock server (curators, youtube lin
     writeFileSync(corpusFile, JSON.stringify({ generatedAt: new Date().toISOString(), source: "live", tagIndex: {}, games: Object.entries(GAME_NAMES).slice(0, 5).map(([id, name], i) => ({ appid: Number(id), name, tags: [{ name: "Roguelike", votes: 9 }, { name: "Indie", votes: 5 }], reviews: { total: i === 0 ? null : 1000 * i }, comingSoon: i === 0, releaseDate: i === 0 ? "Q2 2027" : "2025-05-05", followers: 10 })) }));
     const baseEnv = { ...process.env, STEAM_STORE_BASE: base, STEAMSPY_BASE: base, YOUTUBE_BASE: base, YOUTUBE_API_BASE: base, STEAM_DELAY_MS: "0", STEAMSPY_DELAY_MS: "0", YOUTUBE_DELAY_MS: "0", HTTP_RETRIES: "0" };
     delete baseEnv.YOUTUBE_API_KEY;
+    baseEnv.CM_DEADLINE_MIN = "7";
     // keyless
     const out1 = join(dir, "out1");
     const log1 = await runFetch(baseEnv, ["--out", out1, "--corpus", corpusFile, "--max-curators", "40", "--directory-pages", "3", "--min-output", "10", "--max-yt-channels", "30"]);
     t.diagnostic(log1.split("\n").slice(-14).join("\n"));
+    assert.match(log1, /deadline=7min/, "CM_DEADLINE_MIN is honoured");
+    assert.match(log1, /steamspy: finished/);
     const r1 = JSON.parse(readFileSync(join(out1, "creators.json"), "utf8"));
     assert.deepEqual(validateCreators(r1, { minCreators: 10 }), []);
     assert.equal(r1.source, "live");
