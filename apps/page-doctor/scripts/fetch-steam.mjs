@@ -352,10 +352,14 @@ export async function discoverTag(tag, opts, quotas, steam, spyT, now, outOfTime
   const inMid = (r) => r.reviewTotal >= midMin && r.reviewTotal <= midMax;
 
   // hits + mid (search by review count, newest-window rows only)
-  const rows = recentRows(await searchPages(tag, {
-    maxPages: opts.maxPages, outOfTime,
-    enough: (all) => { const rec = recentRows(all); return rec.length >= over(quotas.hit) && rec.filter(inMid).length >= over(quotas.mid) * 2; },
-  }, steam));
+  let searchErr = null;
+  let rows = [];
+  try {
+    rows = recentRows(await searchPages(tag, {
+      maxPages: opts.maxPages, outOfTime,
+      enough: (all) => { const rec = recentRows(all); return rec.length >= over(quotas.hit) && rec.filter(inMid).length >= over(quotas.mid) * 2; },
+    }, steam));
+  } catch (e) { searchErr = e; warn(`hit/mid search failed for ${tag.name}: ${e.message}`); }
   const hit = rows.slice(0, over(quotas.hit)).map(shape);
   const hitIds = new Set(hit.map((x) => x.appid));
   const searchMid = pickEvenly(rows.filter((r) => !hitIds.has(r.appid) && inMid(r)), over(quotas.mid)).map(shape);
@@ -393,11 +397,12 @@ export async function discoverTag(tag, opts, quotas, steam, spyT, now, outOfTime
       warn(`upcoming search (${filter}) failed for ${tag.name}: ${e.message}`);
     }
   }
+  if (searchErr && !hit.length && !mid.length && !upcoming.length) throw searchErr;
   return { hit, mid, upcoming };
 }
 
 async function fetchStore(item, steam) {
-  const json = await getJson(`${storeBase()}/api/appdetails?appids=${item.appid}&cc=us&l=en`, steam);
+  const json = await getJson(`${storeBase()}/api/appdetails?appids=${item.appid}&cc=us&l=en`, steam, { treat403AsLimit: true });
   return parseStoreDetails(unwrapAppDetails(json, item.appid), { allowAnyType: !!item.watch }) ?? null;
 }
 
