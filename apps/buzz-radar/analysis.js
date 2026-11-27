@@ -196,6 +196,17 @@ function dot(a, b) {
   return s;
 }
 
+// Weight of term `id` in vector v (binary search over the sorted ids).
+function wtOf(v, id) {
+  let lo = 0, hi = v.ids.length - 1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1, x = v.ids[m];
+    if (x === id) return v.w[m];
+    if (x < id) lo = m + 1; else hi = m - 1;
+  }
+  return 0;
+}
+
 function centroid(members, vecs) {
   const acc = new Map();
   for (const m of members) {
@@ -458,20 +469,44 @@ function clusterPosts(posts, vecs, spanMs) {
   const W = Math.max(12 * HOUR, Math.min(72 * HOUR, spanMs / 10));
   const minPts = Math.max(3, Math.min(8, Math.round(Math.sqrt(N) / 4)));
   const minSize = Math.max(minPts, Math.min(8, Math.round(Math.sqrt(N) / 2.5)));
+  // All similar pairs via an inverted index. For every post we record its time-local
+  // neighbours (within W, similarity decayed by time gap) and how many similar posts it has
+  // across the whole dataset.
+  const postings = new Map();
+  vecs.forEach((v, i) => { for (const id of v.ids) { let l = postings.get(id); if (!l) postings.set(id, (l = [])); l.push(i); } });
   const nbrs = posts.map(() => []);
+  const globalCount = new Int32Array(N);
+  const acc = new Float64Array(N);
+  const touched = [];
   for (let i = 0; i < N; i++) {
-    if (!vecs[i].ids.length) continue;
-    for (let j = i + 1; j < N; j++) {
-      const dt = posts[j].t - posts[i].t;
-      if (dt > W) break;
-      if (!vecs[j].ids.length) continue;
-      const s = dot(vecs[i], vecs[j]) * (1 - 0.3 * (dt / W));
-      if (s >= SIM_THRESHOLD) { nbrs[i].push(j); nbrs[j].push(i); }
+    const v = vecs[i];
+    for (let k = 0; k < v.ids.length; k++) {
+      const wi = v.w[k];
+      for (const j of postings.get(v.ids[k])) {
+        if (j === i) continue;
+        if (acc[j] === 0) touched.push(j);
+        acc[j] += wi * wtOf(vecs[j], v.ids[k]);
+      }
     }
+    touched.sort((a, b) => a - b);
+    for (const j of touched) {
+      const cos = acc[j];
+      acc[j] = 0;
+      if (cos < SIM_THRESHOLD) continue;
+      globalCount[i]++;
+      const dt = Math.abs(posts[j].t - posts[i].t);
+      if (dt <= W && cos * (1 - 0.3 * (dt / W)) >= SIM_THRESHOLD) nbrs[i].push(j);
+    }
+    touched.length = 0;
   }
-  // DBSCAN
+  // DBSCAN, with a density-contrast twist: a post is a core point only if enough similar
+  // posts sit near it in time AND a good share of all its look-alikes are in that window.
+  // A topic that recurs at a steady rate all month (a weekly "is it worth it?" question)
+  // forms a ribbon, not an influx, and must not chain unrelated moments together.
+  const localFrac = Math.min(1, (2 * W) / Math.max(spanMs, 1));
+  const needShare = Math.min(0.6, 2 * localFrac);
   const label = new Int32Array(N).fill(-1);
-  const core = nbrs.map((l) => l.length + 1 >= minPts);
+  const core = nbrs.map((l, i) => l.length + 1 >= minPts && l.length >= needShare * globalCount[i]);
   let groups = [];
   for (let i = 0; i < N; i++) {
     if (label[i] !== -1 || !core[i]) continue;

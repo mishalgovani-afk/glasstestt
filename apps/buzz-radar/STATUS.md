@@ -10,16 +10,18 @@ Shared by Claude Code and Codex. Before you edit a file, check the Owner column.
 
 | File | What | Owner now | State |
 |---|---|---|---|
-| `sources.js`, `demo-data.js`, `tests/sources.test.mjs` | Platform connectors and demo data | Claude agent A | v1 done (10/10 tests). Adding Apify (TikTok/IG/X/FB), Reddit RSS fallback, ad-library links |
-| `analysis.js`, `tests/analysis.test.mjs` | Burst detection, clustering, paid-push scoring | Claude agent B | Landed (936 lines), tests pending |
-| `index.html`, `styles.css`, `app.js` | UI | Claude agent C | v1 done. Adding Apify token group, cost estimate, ad-library panel |
+| `sources.js`, `demo-data.js`, `tests/sources.test.mjs` | Platform connectors and demo data | Claude agent A | v2 done (14/14 tests): Apify TikTok/IG/X/FB, Reddit RSS fallback, ad-library links. Now adding TikTok/IG/X/FB posts to the demo data |
+| `analysis.js`, `tests/analysis.test.mjs` | Burst detection, clustering, paid-push scoring | Claude agent B | Clustering works (finds all 5 demo clusters). Fixing burst detection, which misses the sponsored and patch spikes; tests pending |
+| `index.html`, `styles.css`, `app.js` | UI | free | v2 done: Apify token group, cost estimate, ad-library panel |
 | `playbook.js`, `README.md`, `tests/playbook.test.mjs` | Media-buying teaching content | free | Done: 9 archetypes, 31 terms, 9 lessons, 20 disclosure patterns (8/8 tests). Sources were read through search excerpts only, because page fetches were blocked |
 | `MEDIA-BUYING-BRIEF.md` | ~1,300-word sourced learning brief for the user | free | Done |
 | Root `index.html`, root `README.md` | Launcher card and table row | Claude (orchestrator) | Done |
 
 ## Open tasks (free for anyone to claim)
 - [ ] Live-test every connector from a real browser. Claude's sandbox blocks Reddit, Bluesky, Mastodon, Hacker News, Twitch and Apify, so they have not been tested. Record the results here.
-- [ ] Integration pass once `analysis.js` lands: demo mode end to end, Playwright screenshots at 375px and 1280px.
+- [x] Integration pass: launcher card → app → demo works at 1280px and 375px, with no console errors and no horizontal scroll (Claude).
+- [ ] Run each Apify actor once (maxItems=5) and check that the normalizers match the real output. Actor field names are provisional.
+- [ ] Check the ad-library deep-link URL formats in a real browser (Google and TikTok prefill not verified).
 - [ ] Finalize the "Data sources" section in the app's `README.md`.
 
 ## Known facts
@@ -32,3 +34,4 @@ Shared by Claude Code and Codex. Before you edit a file, check the Owner column.
 - 2026-11-27 Claude: contract written, 4 agents started (A connectors / Sonnet, B engine / Opus, C UI / Sonnet, D research / Opus). Launcher card and README row added.
 - 2026-11-27 Claude: A v1 and C v1 landed. Scope expanded to TikTok/IG/X/FB through Apify's free tier, plus ad libraries.
 - 2026-11-27 Claude: D done (playbook, README draft, brief). A's tests at 14/14. B's analysis.js landed.
+- 2026-11-27 Claude: integration check passed. Sent B the burst-detection fix, and A the request for TikTok/IG/X/FB demo posts.
