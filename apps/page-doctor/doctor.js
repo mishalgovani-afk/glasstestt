@@ -288,7 +288,9 @@ const GENRE_WORDS = {
   "narrative": ["narrative", "story"],
 };
 // Genre words to look for even when they don't match the game's own tags.
-const ANY_GENRE_WORDS = Object.values(GENRE_WORDS).flat().filter((v, i, a) => a.indexOf(v) === i);
+// Excludes broad or everyday words ("adventure", "story") that don't establish a genre on their own.
+const GENERIC_GENRE_WORDS = new Set(["adventure", "action", "story", "narrative", "explore", "cards?\\b", "party", "combos?", "monster", "fish", "content", "empire", "psychological", "terrify", "nightmare"]);
+const ANY_GENRE_WORDS = Object.values(GENRE_WORDS).flat().filter((v, i, a) => a.indexOf(v) === i && !GENERIC_GENRE_WORDS.has(v));
 
 const VAGUE_PHRASES = [
   "battle evil", "fight evil", "defeat evil", "save the world", "epic adventure", "epic journey", "like never before",
