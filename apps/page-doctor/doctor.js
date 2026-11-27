@@ -543,7 +543,7 @@ export function scaleFit(comp, target) {
   const targetReleased = !(target?.comingSoon || target?.manual);
   const tLog = Math.max(INDIE_SUCCESS_LOG, (targetReleased ? scaleLog(target) : null) ?? INDIE_SUCCESS_LOG);
   if (comp?.comingSoon) {
-    if (!targetReleased) return 0.85;
+    if (!targetReleased) return 1; // upcoming games in the niche are ideal peers for an unreleased game
     return tLog >= Math.log10(MEGA_REVIEWS) ? 0.3 : 0.6;
   }
   const cLog = scaleLog(comp);
