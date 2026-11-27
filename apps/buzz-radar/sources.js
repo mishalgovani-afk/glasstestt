@@ -109,7 +109,7 @@ export function normalizeYouTube(v, channels = {}) {
     title: stripHtml(sn.title), text, author: sn.channelTitle, authorId: sn.channelId,
     authorFollowers: channels[sn.channelId] ?? null, publishedAt: iso(published || sn.publishedAt),
     metrics: { views: st.viewCount, likes: st.likeCount, comments: st.commentCount, viewers: ld?.concurrentViewers },
-    tags: [...(sn.tags || []).slice(0, 10), ...extractHashtags(sn.title + " " + sn.description)],
+    tags: [...(sn.tags || []).slice(0, 10), ...extractHashtags(stripHtml(sn.title) + " " + text)],
     lang: (sn.defaultAudioLanguage || sn.defaultLanguage || "").slice(0, 2) || null,
   });
 }
