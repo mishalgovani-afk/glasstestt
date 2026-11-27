@@ -93,7 +93,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visibl
 
 main { padding-top: 18px; padding-bottom: 32px; outline: none; }
 .lede { color: var(--ink-2); max-width: 62ch; margin-bottom: 14px; }
-.foot { padding-bottom: 32px; color: var(--ink-2); font-size: 13px; }
+.foot { padding-top: 16px; padding-bottom: 32px; color: var(--ink-2); font-size: 13px; }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
 
@@ -147,7 +147,7 @@ input::placeholder { color: var(--ink-2); opacity: 0.8; }
 
 /* results */
 #results { margin-top: 16px; display: flex; flex-direction: column; gap: 16px; }
-#results.stale .chart-card { opacity: 0.55; }
+#results.stale { opacity: 0.5; pointer-events: none; }
 .banner { padding: 10px 14px; border-radius: 10px; font-size: 14px; background: var(--accent-wash); border: 1px solid var(--border); }
 .banner.warn { background: rgba(251, 179, 21, 0.14); }
 .state { padding: 28px 18px; text-align: center; }
@@ -168,7 +168,7 @@ input::placeholder { color: var(--ink-2); opacity: 0.8; }
 .exports { display: flex; flex-wrap: wrap; gap: 8px; }
 
 h2.sec { font-size: 18px; margin-bottom: 8px; }
-.sec-note { color: var(--ink-2); font-size: 14px; margin-bottom: 10px; }
+.sec-note { color: var(--ink-2); font-size: 14px; margin-bottom: 10px; overflow-wrap: anywhere; }
 .insights { padding: 14px 18px; }
 .insights ul { display: flex; flex-direction: column; gap: 6px; padding-left: 1.1em; }
 
@@ -179,7 +179,7 @@ h2.sec { font-size: 18px; margin-bottom: 8px; }
 .legend .it { display: inline-flex; align-items: center; gap: 6px; }
 .legend .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
 .legend .sw.burst { background: var(--burst); border: 1px dashed var(--burst-edge); }
-.legend .sw.band { background: var(--accent); height: 8px; border-radius: 4px; }
+.legend .sw.bandkey { background: var(--accent); height: 8px; border-radius: 4px; }
 .chart-wrap { position: relative; touch-action: pan-y; }
 .chart-wrap:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
@@ -303,7 +303,7 @@ dialog.dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .set-src fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .set-f { margin-top: 10px; }
 .set-f label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-.set-f .help { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+.set-f .help { font-size: 13px; color: var(--ink-2); margin-top: 4px; overflow-wrap: anywhere; }
 .set-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
 .privacy { margin-top: 10px; }
 .opt { font-weight: 400; color: var(--ink-2); }
