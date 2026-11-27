@@ -213,6 +213,9 @@ const FAMILIES = {
   event: /\b(tournaments?|esports?|e-sports|championships?|invitational|qualifiers?|brackets?|grand finals?|finals|showcase|nintendo direct|state of play|summer game fest|game awards|gamescom|evo|world cup|majors?\b(?=.*\b(cs|valorant|dota|league)\b)|pro league|lan event)\b/,
   controversy: /\b(refunds?|refunded|boycott(ing)?|drama|review[- ]?bomb(ed|ing)?|backlash|scandal|lawsuit|sued|layoffs?|controvers(y|ial)|outrage|scam(med)?|petition|apolog(y|ise|ize|ises|izes|ized)|pay ?to ?win|p2w|delisted|predatory|greed(y)?)\b/,
 };
+// "launches the boss across the map", "boss launch clip": physics, not a product launch.
+const NOT_LAUNCH = /\b(boss|player|enemy|car|ragdoll|physics)\s+launch(es|ed|ing)?\b|\blaunch(es|ed|ing)?\s+(the\s+|a\s+|my\s+)?(boss|player|enemy|enemies|me|him|her|them|across|into|off|over|out of|sky)\b/g;
+
 const FAMILY_WORDS = {
   launch: "launch / release terms",
   trailer: "trailer / reveal terms",
@@ -655,7 +658,7 @@ function archetypeFor(sig, score, fam, streamShare, n) {
   }
   if (score >= 60) return { archetype: streamShare >= 0.5 ? "streamer-sponsorship" : "sponsored-creator-wave", family: null };
   // Organic viral: attention concentrated on a few posts and bunched in time, or a big tight swarm.
-  if ((sig.engagementSkew >= 0.4 && sig.synchronicity >= 0.3) || (sig.synchronicity >= 0.55 && n >= 8)) return { archetype: "organic-viral", family: null };
+  if ((sig.engagementSkew >= 0.4 && sig.synchronicity >= 0.5) || (sig.synchronicity >= 0.55 && n >= 8)) return { archetype: "organic-viral", family: null };
   return { archetype: "background-chatter", family: null };
 }
 
@@ -744,7 +747,7 @@ function analyzeCluster(id, members, ctx, isBackground) {
   const sources = countBy(members, (p) => p.source);
   const streamShare = members.filter((p) => p.kind === "stream" || p.source === "twitch").length / (n || 1);
   const fam = {};
-  for (const [k, re] of Object.entries(FAMILIES)) fam[k] = members.filter((p) => re.test(p.lower)).length / (n || 1);
+  for (const [k, re] of Object.entries(FAMILIES)) fam[k] = members.filter((p) => re.test(k === "launch" ? p.lower.replace(NOT_LAUNCH, " ") : p.lower)).length / (n || 1);
 
   let archetype, family;
   if (isBackground) { archetype = "background-chatter"; family = null; score = Math.min(score, 40); }
@@ -823,6 +826,9 @@ function analyzeCluster(id, members, ctx, isBackground) {
 // ---------------------------------------------------------------------------------------------
 // Step 6: insights
 
+const NEVER_PAID = new Set(["organic-viral", "controversy", "background-chatter"]);
+const isLikelyPaid = (c) => c.campaignScore >= 55 && !NEVER_PAID.has(c.archetype);
+
 function buildInsights(clusters, bursts, posts, totals, ctx) {
   const out = [];
   const N = posts.length;
@@ -833,8 +839,8 @@ function buildInsights(clusters, bursts, posts, totals, ctx) {
   out.push(`${N} posts from ${totals.creators} creators across ${plural(nSrc, "platform")} over ${plural(days, "day")}; ${srcName(srcTop[0][0])} carries ${pct(srcTop[0][1] / N)} of the volume.`);
 
   const real = clusters.filter((c) => !c._bg);
-  const paid = real.filter((c) => c.campaignScore >= 55);
-  const organic = real.filter((c) => c.campaignScore < 55);
+  const paid = real.filter(isLikelyPaid);
+  const organic = real.filter((c) => !isLikelyPaid(c));
   const bg = clusters.find((c) => c._bg);
   if (paid.length) {
     const best = [...paid].sort((a, b) => b.campaignScore - a.campaignScore || b._n - a._n)[0];
