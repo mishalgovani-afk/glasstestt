@@ -56,3 +56,35 @@ export function validateCreators(c, { minCreators = 1 } = {}) {
   });
   return errs;
 }
+
+/**
+ * Make a creators file safe to write: add a games[] stub {appid, name, tags: []} for every covered appid that is missing from games[],
+ * drop duplicate or invalid games, and drop (with a WARN) any creator that still fails validation. Never throws.
+ * Returns { file, stubs, droppedCreators, droppedGames }.
+ */
+export function repairCreators(file, warn = console.warn) {
+  const out = { ...file };
+  const games = new Map();
+  let droppedGames = 0;
+  for (const g of file.games || []) {
+    if (!g || !isNum(g.appid) || g.appid <= 0 || !isStr(g.name) || !g.name || games.has(g.appid)) { droppedGames++; warn(`dropping invalid or duplicate games[] entry ${JSON.stringify(g)?.slice(0, 80)}`); continue; }
+    const probe = validateCreators({ generatedAt: file.generatedAt, source: file.source, creators: [], games: [g] }, { minCreators: 0 });
+    if (probe.length) { droppedGames++; warn(`dropping games[] entry ${g.appid}: ${probe[0]}`); continue; }
+    games.set(g.appid, g);
+  }
+  let stubs = 0;
+  for (const c of file.creators || []) for (const cg of c?.coveredGames || []) {
+    if (cg && isNum(cg.appid) && cg.appid > 0 && !games.has(cg.appid)) { games.set(cg.appid, { appid: cg.appid, name: isStr(cg.name) && cg.name ? cg.name : `App ${cg.appid}`, tags: [] }); stubs++; }
+  }
+  const creators = [];
+  let droppedCreators = 0;
+  for (const c of file.creators || []) {
+    const errs = validateCreators({ generatedAt: file.generatedAt, source: file.source, creators: [c], games: [...games.values()] }, { minCreators: 0 });
+    if (errs.length) { droppedCreators++; warn(`dropping creator ${c?.id}: ${errs[0]}`); continue; }
+    creators.push(c);
+  }
+  if (stubs) warn(`added ${stubs} games[] stubs for covered games that were missing`);
+  out.creators = creators;
+  out.games = [...games.values()].sort((x, y) => x.appid - y.appid);
+  return { file: out, stubs, droppedCreators, droppedGames };
+}

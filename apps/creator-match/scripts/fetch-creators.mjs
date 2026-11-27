@@ -34,7 +34,7 @@ import {
   parseYouTubeFeed, uploadsPerMonth, averageViews, parseYtSearch, parseYtChannels, parseYtVideos, buildGameIndex,
   matchGamesInTitle, buildTagAffinity, selectCurators, normTitle, parseStorePageTags, parseCuratorDate,
 } from "./parsers.mjs";
-import { validateCreators } from "./validate.mjs";
+import { validateCreators, repairCreators } from "./validate.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const storeBase = () => process.env.STEAM_STORE_BASE || "https://store.steampowered.com";
@@ -315,6 +315,9 @@ export async function main(argv = process.argv.slice(2)) {
   log(`creators: ${out.length} ${JSON.stringify(byPlat)}; games referenced: ${gamesOut.length} (with tags: ${gamesOut.filter((g) => g.tags.length).length}, of which uncovered ${gamesOut.filter((g) => !referenced.has(g.appid)).length}, SteamSpy lookups ${spyOk}/${spyTried.size})`);
   log(`followers known for ${out.filter((c) => c.followers != null).length}; with other links: ${out.filter((c) => c.links.length > 1).length}; active in last 90 days: ${out.filter((c) => c.lastActive && now - Date.parse(c.lastActive) < 90 * DAY).length}`);
   log(store.summary()); log(spyT.summary()); log(ytT.summary()); if (apiKey) log(apiT.summary());
+  const repaired = repairCreators(result, warn);
+  result.creators = repaired.file.creators;
+  result.games = repaired.file.games;
   const errs = validateCreators(result, { minCreators: opts.minOutput });
   if (errs.length) {
     for (const e of errs.slice(0, 15)) warn("validation: " + e);

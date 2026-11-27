@@ -17,9 +17,9 @@ import { join, resolve } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { parseArgs, numEnv, Throttle, getJson, writeJsonAtomic, log, warn } from "./lib.mjs";
 import { parseCuratorDirectory, parseCuratorPage, buildTagAffinity } from "./parsers.mjs";
-import { validateCreators } from "./validate.mjs";
+import { validateCreators, repairCreators } from "./validate.mjs";
 import { fetchDirectory, fetchRecommendations, fetchWatchGame, curatorToCreator } from "./fetch-creators.mjs";
-import { getText } from "./lib.mjs";
+import { getText, sleep } from "./lib.mjs";
 
 const storeBase = () => process.env.STEAM_STORE_BASE || "https://store.steampowered.com";
 const spyBase = () => process.env.STEAMSPY_BASE || "https://steamspy.com";
@@ -136,7 +136,28 @@ export async function main(argv = process.argv.slice(2)) {
   }
   log(`directory: ${directory.size} curators scanned, tags looked up for ${looked} reviewed games; ${candidates.size} candidates`);
 
-  // ---- 4. crawl the best candidates
+  // ---- 4. crawl the best candidates. SteamSpy tag lookups for the games they covered run in the background meanwhile
+  // (different host, own rate limit), most-covered first, so tagAffinity is meaningful by the time we write.
+  const cover = new Map();
+  const tried = new Set();
+  let crawlDone = false, tagged = 0, tfails = 0;
+  const tagWorker = async () => {
+    while (!before(0.97) && tfails < 8) {
+      let best = null, bc = 0;
+      for (const [id, n] of cover) if (n > bc && !tried.has(id) && !(known.get(id)?.tags?.length)) { best = id; bc = n; }
+      if (best == null) { if (crawlDone) break; await sleep(300); continue; }
+      tried.add(best);
+      try {
+        const sp = await getJson(`${spyBase()}/api.php?request=appdetails&appid=${best}`, spyT);
+        const g = known.get(best) || { appid: best, name: sp?.name || `App ${best}` };
+        g.tags = sp?.tags && !Array.isArray(sp.tags) ? Object.entries(sp.tags).sort((x, y) => y[1] - x[1]).map(([n]) => n).slice(0, 12) : [];
+        if (sp?.name && /^App \d+$/.test(g.name)) g.name = sp.name;
+        known.set(best, g);
+        tagged++; tfails = 0;
+      } catch { tfails++; }
+    }
+  };
+  const tagJob = tagWorker().catch((e) => warn("tag worker: " + e.message));
   const ranked = [...candidates.values()].sort((x, y) => y.score - x.score || (x.c.id < y.c.id ? -1 : 1)).slice(0, maxCurators);
   const creators = new Map();
   const direct = [];
@@ -152,26 +173,14 @@ export async function main(argv = process.argv.slice(2)) {
       if (!cr) continue;
       cr.fetchedAt = new Date().toISOString();
       creators.set(cr.id, cr);
+      for (const g of cr.coveredGames) if (g.appid != null) cover.set(g.appid, (cover.get(g.appid) || 0) + 1);
       if (cr.coveredGames.some((g) => targetIds.has(g.appid))) direct.push(`${cr.name} (${cr.id})`);
       for (const r of recs) if (r.appid && !known.has(r.appid)) known.set(r.appid, { appid: r.appid, name: r.name || `App ${r.appid}`, tags: [] });
       log(`  crawled ${cr.id} "${cr.name}" [${why}]: ${cr.coveredGames.length} covered games`);
     } catch (e) { warn(`curator ${c.id}: ${e.message}`); }
   }
-  // tags for games these creators covered (so tagAffinity is meaningful), most-covered first
-  const cover = new Map();
-  for (const cr of creators.values()) for (const g of cr.coveredGames) if (g.appid != null) cover.set(g.appid, (cover.get(g.appid) || 0) + 1);
-  let tagged = 0, tfails = 0;
-  for (const [id] of [...cover.entries()].sort((x, y) => y[1] - x[1])) {
-    if (before(0.97) || tfails >= 5) break;
-    if (known.get(id)?.tags?.length) continue;
-    try {
-      const sp = await getJson(`${spyBase()}/api.php?request=appdetails&appid=${id}`, spyT);
-      const g = known.get(id) || { appid: id, name: sp?.name || `App ${id}` };
-      g.tags = sp?.tags && !Array.isArray(sp.tags) ? Object.entries(sp.tags).sort((x, y) => y[1] - x[1]).map(([n]) => n).slice(0, 12) : [];
-      known.set(id, g);
-      tagged++; tfails = 0;
-    } catch { tfails++; }
-  }
+  crawlDone = true;
+  await tagJob;
 
   // ---- 5. write the partial file
   const gamesByAppid = new Map([...known.entries()].map(([id, g]) => [id, { tags: g.tags || [] }]));
@@ -185,8 +194,10 @@ export async function main(argv = process.argv.slice(2)) {
     if (g.comingSoon !== undefined) o.comingSoon = g.comingSoon;
     if (g.releaseDate) o.releaseDate = g.releaseDate;
     return o;
-  }).filter((g) => targetIds.has(g.appid) || !/^App \d+$/.test(g.name)).sort((x, y) => x.appid - y.appid);
-  const result = { generatedAt: new Date().toISOString(), source: "live", creators: out, games, meta: { addedGames: [...targetIds], directCurators: direct } };
+  }).sort((x, y) => x.appid - y.appid);
+  // every covered game must be in games[]: missing ones get a stub; broken records are dropped with a WARN instead of failing the run
+  const repaired = repairCreators({ generatedAt: new Date().toISOString(), source: "live", creators: out, games }, warn);
+  const result = { ...repaired.file, meta: { addedGames: [...targetIds], directCurators: direct } };
   const errs = validateCreators(result, { minCreators: 0 });
   if (errs.length) throw new Error(`creators did not validate: ${errs.slice(0, 3).join("; ")}`);
   writeJsonAtomic(join(a.out, "creators.json"), result);
@@ -195,7 +206,7 @@ export async function main(argv = process.argv.slice(2)) {
   log(`requested ${terms.length}, resolved ${targets.length}: ${targets.map((t) => `${t.appid} ${t.name}`).join("; ")}`);
   log(`curators: ${directory.size} scanned, ${candidates.size} candidates, ${crawled} crawled, ${out.length} written (${out.filter((c) => baseCreators?.creators?.some((b) => b.id === c.id)).length} refreshed, rest new)`);
   log(`curators that reviewed a requested game: ${direct.length ? direct.join(", ") : "none found"}`);
-  log(`games[] in file: ${games.length} (tags looked up for ${tagged} covered games); wrote ${join(a.out, "creators.json")} in ${Math.round((Date.now() - t0) / 1000)}s`);
+  log(`games[] in file: ${result.games.length} (${repaired.stubs} stubs; tags looked up for ${tagged} covered games); wrote ${join(a.out, "creators.json")} in ${Math.round((Date.now() - t0) / 1000)}s`);
   log(store.summary()); log(spyT.summary());
   return result;
 }

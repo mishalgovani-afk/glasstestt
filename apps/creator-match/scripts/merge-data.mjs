@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import { parseArgs, writeJsonAtomic, log, warn } from "./lib.mjs";
-import { validateCreators } from "./validate.mjs";
+import { validateCreators, repairCreators } from "./validate.mjs";
 
 function readJson(p) {
   try { return p && existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null; } catch (e) { warn(`cannot read ${p}: ${e.message}`); return null; }
@@ -19,7 +19,7 @@ function readJson(p) {
 const ts = (v) => { const t = Date.parse(v || ""); return Number.isFinite(t) ? t : 0; };
 const maxIso = (a, b) => (ts(a) >= ts(b) ? a : b) || new Date(0).toISOString();
 
-export function mergeCreators(base, next, { max = 3000 } = {}) {
+export function mergeCreators(base, next, { max = 3000, warn: say = () => {} } = {}) {
   if (base && base.source !== "live") base = null;
   if (next && next.source !== "live" && base) next = null;
   const creators = new Map();
@@ -39,12 +39,13 @@ export function mergeCreators(base, next, { max = 3000 } = {}) {
     const cur = games.get(g.appid);
     if (!cur || (g.tags?.length ?? 0) >= (cur.tags?.length ?? 0)) games.set(g.appid, g);
   }
-  return {
+  const merged = {
     generatedAt: maxIso(base?.generatedAt, next?.generatedAt),
     source: base?.source === "live" || next?.source === "live" ? "live" : "sample",
     creators: list,
     games: [...games.values()].sort((x, y) => x.appid - y.appid),
   };
+  return repairCreators(merged, say).file; // never leaves dangling game references: missing games get a stub
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -53,7 +54,7 @@ export function main(argv = process.argv.slice(2)) {
   const base = readJson(a.base);
   const next = readJson(a.new);
   if (!base && !next) throw new Error("neither --base nor --new could be read");
-  const out = mergeCreators(base, next, { max: Number(a.max ?? 3000) });
+  const out = mergeCreators(base, next, { max: Number(a.max ?? 3000), warn });
   const errs = validateCreators(out, { minCreators: 0 });
   if (errs.length) throw new Error(`merged creators do not validate: ${errs.slice(0, 5).join("; ")}`);
   writeJsonAtomic(a.out, out);

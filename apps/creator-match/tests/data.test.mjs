@@ -13,7 +13,7 @@ import {
   parseYouTubeUrl, parseChannelIdFromHtml, parseYouTubeFeed, uploadsPerMonth, averageViews, parseYtSearch, parseYtChannels, parseYtVideos,
   buildGameIndex, matchGamesInTitle, buildTagAffinity, selectCurators, toIso,
 } from "../scripts/parsers.mjs";
-import { validateCreators } from "../scripts/validate.mjs";
+import { validateCreators, repairCreators } from "../scripts/validate.mjs";
 import { makeSample, makeSampleCatalog } from "../scripts/make-sample.mjs";
 import { mergeCreators } from "../scripts/merge-data.mjs";
 import { curatorToCreator } from "../scripts/fetch-creators.mjs";
@@ -571,4 +571,25 @@ test("add-game.mjs finds curators for requested games and writes a partial creat
     assert.ok(r.creators.some((c) => c.coveredGames.some((g) => g.appid === 3000003)), "curators who reviewed a requested game were found");
     assert.deepEqual(r.meta.addedGames.sort(), [2876290, 3000002, 3000003]);
   } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("regression: covered games missing from games[] get stubs, broken records are dropped with a WARN, merges never dangle", () => {
+  const warns = [];
+  const youtube = makeSample().creators.find((c) => c.platform === "youtube");
+  const dangling = { ...youtube, id: UCa, coveredGames: [{ appid: 3339970, name: "Covered But Unlisted", url: null, date: null, title: "t", views: null }, { appid: 3393110, name: "Another", url: null, date: null, title: "t", views: null }] };
+  const broken = { ...youtube, id: UCb, name: "", coveredGames: [] };
+  const file = { generatedAt: "2026-11-01T00:00:00.000Z", source: "live", creators: [dangling, broken], games: [{ appid: 1, name: "ok", tags: [] }, { appid: 1, name: "duplicate", tags: [] }, { appid: 2, name: "bad tags", tags: "x" }] };
+  assert.notDeepEqual(validateCreators(file), [], "the input really is invalid");
+  const r = repairCreators(file, (m) => warns.push(m));
+  assert.deepEqual(validateCreators(r.file, { minCreators: 0 }), []);
+  assert.deepEqual(r.file.creators.map((c) => c.id), [UCa], "the broken creator is dropped, the dangling one repaired");
+  assert.deepEqual(r.file.games.map((g) => [g.appid, g.name, g.tags.length]), [[1, "ok", 0], [3339970, "Covered But Unlisted", 0], [3393110, "Another", 0]]);
+  assert.equal(r.stubs, 2);
+  assert.ok(warns.some((w) => /stubs/.test(w)) && warns.some((w) => /dropping creator/.test(w)) && warns.some((w) => /dropping/.test(w)));
+  // a merge whose inputs reference games that appear in neither games[] cannot produce dangling references
+  const base = live([{ ...dangling, fetchedAt: "2026-10-01T00:00:00.000Z" }], []);
+  const next = live([cr(UCc, "2026-11-01T00:00:00.000Z", { coveredGames: [{ appid: 77, name: "Seventy Seven", url: null, date: null, title: "t", views: null }] })], []);
+  const m = mergeCreators(base, next);
+  assert.deepEqual(validateCreators(m, { minCreators: 2 }), []);
+  assert.deepEqual(m.games.map((g) => g.appid), [77, 3339970, 3393110]);
 });
