@@ -7,6 +7,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * *"   # daily: rebuild so Page Doctor / Creator Match pick up fresh Steam data
 
 permissions:
   contents: read
@@ -32,6 +34,8 @@ jobs:
         run: |
           for t in apps/*/tests/*.test.mjs; do [ -f "$t" ] && node --test "$t"; done
       - name: Build site
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: ./scripts/build-site.sh
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
